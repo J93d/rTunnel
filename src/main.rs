@@ -5,7 +5,7 @@ mod keyring_manager;
 mod tunnel;
 
 use config::{TunnelConfig, load_configs, save_configs};
-use slint::{Model, ModelRc, SharedString, VecModel};
+use slint::{ModelRc, SharedString, VecModel};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -103,22 +103,40 @@ fn main() {
     let state_clone = state.clone();
     let tunnels_model_clone = tunnels_model.clone();
     let app_weak = app.as_weak();
+    app.on_update_search(move || {
+        if let Some(app) = app_weak.upgrade() {
+            let query = app.get_search_text().to_string().to_lowercase();
+            let st = state_clone.lock().unwrap();
+            let mut new_data = Vec::new();
+            for c in &st.configs {
+                if query.is_empty() || c.name.to_lowercase().contains(&query) {
+                    let is_running = st.running_tunnels.contains_key(&c.id);
+                    new_data.push(config_to_data(c, is_running));
+                }
+            }
+            tunnels_model_clone.set_vec(new_data);
+        }
+    });
+
+    let state_clone = state.clone();
+    let app_weak = app.as_weak();
     app.on_create_new(move || {
         let mut st = state_clone.lock().unwrap();
         let new_c = TunnelConfig::default();
         st.configs.push(new_c.clone());
-        tunnels_model_clone.push(config_to_data(&new_c, false));
         let _ = save_configs(&st.configs);
+        drop(st);
 
         if let Some(app) = app_weak.upgrade() {
-            let new_idx = (st.configs.len() - 1) as i32;
-            app.set_selected_idx(new_idx);
+            app.set_search_text("".into());
+            app.invoke_update_search();
+            app.set_selected_id(r2s(&new_c.id));
             app.set_edit_data(config_to_data(&new_c, false));
         }
     });
 
     let state_clone = state.clone();
-    let tunnels_model_clone = tunnels_model.clone();
+    let app_weak = app.as_weak();
     app.on_save_config(move |data: TunnelData| {
         let mut st = state_clone.lock().unwrap();
         let updated = data_to_config(&data);
@@ -129,7 +147,6 @@ fn main() {
                 &updated.proxy_username,
             );
         }
-
         if !updated.save_remote_password {
             let _ = keyring_manager::delete_password(
                 &keyring_manager::get_remote_service_name(&updated.id),
@@ -139,20 +156,24 @@ fn main() {
 
         if let Some(pos) = st.configs.iter().position(|c| c.id == updated.id) {
             st.configs[pos] = updated.clone();
-            let is_running = st.running_tunnels.contains_key(&updated.id);
-            tunnels_model_clone.set_row_data(pos, config_to_data(&updated, is_running));
         }
         let _ = save_configs(&st.configs);
+        drop(st);
+
+        if let Some(app) = app_weak.upgrade() {
+            app.set_selected_id("".into());
+            app.invoke_update_search();
+        }
     });
 
     let state_clone = state.clone();
     let app_weak = app.as_weak();
-    app.on_select_tunnel(move |idx: i32| {
+    app.on_select_tunnel(move |id: SharedString| {
         if let Some(app) = app_weak.upgrade() {
             let st = state_clone.lock().unwrap();
-            if idx >= 0 && (idx as usize) < st.configs.len() {
-                app.set_selected_idx(idx);
-                let c = &st.configs[idx as usize];
+            let id = s2r(id);
+            if let Some(c) = st.configs.iter().find(|x| x.id == id) {
+                app.set_selected_id(r2s(&id));
                 let is_running = st.running_tunnels.contains_key(&c.id);
                 app.set_edit_data(config_to_data(c, is_running));
             }
@@ -160,30 +181,63 @@ fn main() {
     });
 
     let state_clone = state.clone();
-    let tunnels_model_clone = tunnels_model.clone();
-    app.on_toggle_auto_connect(move |idx: i32, auto_connect: bool| {
+    let app_weak = app.as_weak();
+    app.on_toggle_auto_connect(move |id: SharedString, auto_connect: bool| {
         let mut st = state_clone.lock().unwrap();
-        if idx >= 0 && (idx as usize) < st.configs.len() {
-            st.configs[idx as usize].auto_connect = auto_connect;
-            let c = &st.configs[idx as usize];
-            let is_running = st.running_tunnels.contains_key(&c.id);
-            tunnels_model_clone.set_row_data(idx as usize, config_to_data(c, is_running));
+        let id_str = s2r(id);
+        if let Some(pos) = st.configs.iter().position(|x| x.id == id_str) {
+            st.configs[pos].auto_connect = auto_connect;
             let _ = save_configs(&st.configs);
+        }
+        drop(st);
+        if let Some(app) = app_weak.upgrade() {
+            app.invoke_update_search();
         }
     });
 
     let state_clone = state.clone();
-    let tunnels_model_clone = tunnels_model.clone();
-    app.on_copy_tunnel(move |idx: i32| {
+    let app_weak = app.as_weak();
+    app.on_copy_tunnel(move |id: SharedString| {
         let mut st = state_clone.lock().unwrap();
-        if idx >= 0 && (idx as usize) < st.configs.len() {
-            let mut new_c = st.configs[idx as usize].clone();
+        let id_str = s2r(id);
+        if let Some(pos) = st.configs.iter().position(|x| x.id == id_str) {
+            let mut new_c = st.configs[pos].clone();
             new_c.id = uuid::Uuid::new_v4().to_string();
             new_c.name = format!("{} (Copy)", new_c.name);
-
-            st.configs.push(new_c.clone());
-            tunnels_model_clone.push(config_to_data(&new_c, false));
+            st.configs.push(new_c);
             let _ = save_configs(&st.configs);
+        }
+        drop(st);
+        if let Some(app) = app_weak.upgrade() {
+            app.invoke_update_search();
+        }
+    });
+
+    let state_clone = state.clone();
+    let app_weak = app.as_weak();
+    app.on_delete_tunnel(move |id: SharedString| {
+        let mut st = state_clone.lock().unwrap();
+        let id_str = s2r(id);
+        if let Some(pos) = st.configs.iter().position(|x| x.id == id_str) {
+            let c = &st.configs[pos];
+            let _ = keyring_manager::delete_password(
+                &keyring_manager::get_proxy_service_name(&id_str),
+                &c.proxy_username,
+            );
+            let _ = keyring_manager::delete_password(
+                &keyring_manager::get_remote_service_name(&id_str),
+                &c.remote_username,
+            );
+            st.configs.remove(pos);
+            let _ = save_configs(&st.configs);
+
+            if let Some(running) = st.running_tunnels.remove(&id_str) {
+                running.store(false, Ordering::Relaxed);
+            }
+        }
+        drop(st);
+        if let Some(app) = app_weak.upgrade() {
+            app.invoke_update_search();
         }
     });
 
@@ -231,7 +285,6 @@ fn main() {
     });
 
     let state_clone = state.clone();
-    let tunnels_model_clone = tunnels_model.clone();
     let app_weak = app.as_weak();
     app.on_submit_passwords(
         move |id: SharedString, p_pass: SharedString, r_pass: SharedString| {
@@ -287,22 +340,15 @@ fn main() {
                         }
                     });
                 });
-
-                if let Some(pos) = st.configs.iter().position(|x| x.id == id) {
-                    let c_ref = &st.configs[pos];
-                    tunnels_model_clone.set_row_data(pos, config_to_data(c_ref, true));
-                    if let Some(app) = app_weak.upgrade()
-                        && app.get_selected_idx() == pos as i32
-                    {
-                        app.set_edit_data(config_to_data(c_ref, true));
-                    }
-                }
+            }
+            drop(st);
+            if let Some(app) = app_weak.upgrade() {
+                app.invoke_update_search();
             }
         },
     );
 
     let state_clone = state.clone();
-    let tunnels_model_clone = tunnels_model.clone();
     let app_weak = app.as_weak();
     app.on_stop_tunnel(move |id: SharedString| {
         let id = s2r(id);
@@ -310,15 +356,9 @@ fn main() {
         if let Some(running) = st.running_tunnels.remove(&id) {
             running.store(false, Ordering::Relaxed);
         }
-
-        if let Some(pos) = st.configs.iter().position(|x| x.id == id) {
-            let c_ref = &st.configs[pos];
-            tunnels_model_clone.set_row_data(pos, config_to_data(c_ref, false));
-            if let Some(app) = app_weak.upgrade()
-                && app.get_selected_idx() == pos as i32
-            {
-                app.set_edit_data(config_to_data(c_ref, false));
-            }
+        drop(st);
+        if let Some(app) = app_weak.upgrade() {
+            app.invoke_update_search();
         }
     });
 
@@ -337,16 +377,18 @@ fn main() {
         app.invoke_start_tunnel(r2s(&id));
     }
 
-    // System Tray: Slint's native SystemTrayIcon — integrates cleanly with the event loop
-    let tray = AppTray::new().unwrap();
-    let app_weak_tray = app.as_weak();
-    tray.on_show_window(move || {
-        if let Some(app) = app_weak_tray.upgrade() {
-            let _ = app.window().show();
-        }
-    });
-    tray.on_quit(|| {
-        slint::quit_event_loop().unwrap();
+    // System Tray: optional — app continues even if tray is unavailable
+    let _tray = AppTray::new().ok().map(|tray| {
+        let app_weak_tray = app.as_weak();
+        tray.on_show_window(move || {
+            if let Some(app) = app_weak_tray.upgrade() {
+                let _ = app.window().show();
+            }
+        });
+        tray.on_quit(|| {
+            slint::quit_event_loop().unwrap();
+        });
+        tray
     });
 
     let app_weak2 = app.as_weak();

@@ -1,4 +1,4 @@
-﻿import { CheckBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { CheckBox, LineEdit, ScrollView } from "std-widgets.slint";
 
 export struct TunnelData {
     id: string,
@@ -61,7 +61,7 @@ component EditIcon inherits Path {
     commands: "M 10 1 L 13 4 L 4 13 L 1 13 L 1 10 Z M 8.5 2.5 L 11.5 5.5";
 }
 
-// â”€â”€ Copy / duplicate icon (two overlapping pages) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Copy / duplicate icon (two overlapping pages) ─────────────────────────
 component CopyIcon inherits Path {
     in property <color> icon-color: Palette.text-sub;
     fill: transparent;
@@ -71,7 +71,17 @@ component CopyIcon inherits Path {
     commands: "M 5 0 L 13 0 L 13 8 L 5 8 Z M 1 4 L 9 4 L 9 12 L 1 12 Z";
 }
 
-// â”€â”€ Three vertical dots for "more" â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Delete / trash icon ──────────────────────────────────────────────────
+component DeleteIcon inherits Path {
+    in property <color> icon-color: Palette.text-sub;
+    fill: transparent;
+    stroke: icon-color;
+    stroke-width: 1.4px;
+    width: 14px; height: 14px;
+    commands: "M 2 3 L 12 3 M 5 3 L 5 1 L 9 1 L 9 3 M 3 3 L 4 13 L 10 13 L 11 3 M 6 6 L 6 10 M 8 6 L 8 10";
+}
+
+// ── Three vertical dots for "more" ──────────────────────────────────────
 component MoreIcon inherits Rectangle {
     in property <color> icon-color: Palette.text-sub;
     background: transparent;
@@ -186,6 +196,11 @@ component IconBtn inherits Rectangle {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
     }
+    if (kind == "delete") : DeleteIcon {
+        icon-color: Palette.text-sub;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
 
     TouchArea { clicked => { root.clicked(); } }
 }
@@ -202,6 +217,7 @@ component AutoConnectBox inherits HorizontalLayout {
 
     Rectangle {
         width: 16px; height: 16px;
+        y: 10px;
         border-radius: 4px;
         border-width: 1.5px;
         border-color: checked ? Palette.accent : Palette.border-light;
@@ -238,16 +254,19 @@ export component AppWindow inherits Window {
     callback show_window();
 
     in-out property <[TunnelData]> tunnels: [];
-    in-out property <int>          selected_idx: -1;
+    in-out property <string>       selected_id: "";
     in-out property <TunnelData>   edit_data;
+    in-out property <string>       search_text: "";
 
     callback start_tunnel(string);
     callback stop_tunnel(string);
     callback save_config(TunnelData);
     callback create_new();
-    callback select_tunnel(int);
-    callback copy_tunnel(int);
-    callback toggle_auto_connect(int, bool);
+    callback select_tunnel(string);
+    callback copy_tunnel(string);
+    callback delete_tunnel(string);
+    callback toggle_auto_connect(string, bool);
+    callback update_search();
 
     in-out property <bool>   show_password_prompt: false;
     in-out property <string> prompt_tunnel_id;
@@ -263,7 +282,7 @@ export component AppWindow inherits Window {
 
     HorizontalLayout {
 
-        // â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Sidebar ─────────────────────────────────────────────────────────────────
         Rectangle {
             width: 62px;
             background: Palette.sidebar;
@@ -335,10 +354,10 @@ export component AppWindow inherits Window {
         // Sidebar divider
         Rectangle { width: 1px; background: Palette.border; }
 
-        // â”€â”€ Main content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Main content ────────────────────────────────────────────────────────────
         VerticalLayout {
 
-            // â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── Header ───────────────────────────────────────────────────────────
             HorizontalLayout {
                 padding-left: 32px;
                 padding-right: 24px;
@@ -348,50 +367,13 @@ export component AppWindow inherits Window {
                 Text {
                     text: "Tunnels";
                     font-size: 32px;
+                    font-family: "Roboto";
                     font-weight: 800;
                     color: Palette.text-main;
                     vertical-alignment: center;
                 }
 
                 Rectangle { horizontal-stretch: 1; }
-
-                // Add New Tunnel button
-                Rectangle {
-                    width: 164px; height: 44px;
-                    border-radius: 10px;
-                    background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
-                    drop-shadow-color: Palette.accent.with-alpha(0.4);
-                    drop-shadow-blur: 16px;
-                    drop-shadow-offset-y: 5px;
-
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: 7px;
-                        // Plus sign drawn as two rectangles
-                        Rectangle {
-                            width: 14px; height: 14px;
-                            background: transparent;
-                            Rectangle { x: 6px; y: 0px; width: 2px; height: 14px; background: white; border-radius: 1px; }
-                            Rectangle { x: 0px; y: 6px; width: 14px; height: 2px; background: white; border-radius: 1px; }
-                        }
-                        Text {
-                            text: "Add New Tunnel";
-                            font-size: 13px;
-                            font-weight: 700;
-                            color: white;
-                            vertical-alignment: center;
-                        }
-                    }
-                    TouchArea { clicked => { create_new(); } }
-                }
-            }
-
-            // â”€â”€ Search / filter row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            HorizontalLayout {
-                alignment: end;
-                padding-right: 24px;
-                padding-bottom: 14px;
-                spacing: 10px;
 
                 // Search pill
                 Rectangle {
@@ -400,6 +382,7 @@ export component AppWindow inherits Window {
                     background: Palette.card;
                     border-width: 1px;
                     border-color: Palette.border;
+                    y: (parent.height - self.height) / 2;
 
                     HorizontalLayout {
                         padding-left: 14px;
@@ -418,41 +401,30 @@ export component AppWindow inherits Window {
                         }
 
                         TextInput {
+                            text <=> search_text;
                             color: Palette.text-main;
                             font-size: 13px;
                             vertical-alignment: center;
+                            width: 100%;
+                            height: 100%;
+                            edited => { update_search(); }
                         }
                     }
                 }
-
-                // Filter icon button (funnel)
-                Rectangle {
-                    width: 36px; height: 36px;
-                    border-radius: 18px;
-                    background: transparent;
-
-                    Path {
-                        fill: Palette.text-sub;
-                        width: 16px; height: 14px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        commands: "M 0 0 L 16 0 L 10 7 L 10 14 L 6 14 L 6 7 Z";
-                    }
-                    TouchArea {}
-                }
             }
 
-            // â”€â”€ Tunnel cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── Tunnel cards ────────────────────────────────────────────────────────────
             ScrollView {
                 vertical-stretch: 1;
 
                 VerticalLayout {
+                    alignment: start;
                     padding-left: 20px;
                     padding-right: 20px;
                     padding-bottom: 80px;
                     spacing: 14px;
 
-                    for t[idx] in tunnels : Rectangle {
+                    for t in tunnels : Rectangle {
                         border-radius: 12px;
                         background: Palette.card;
                         border-width: 1px;
@@ -465,10 +437,9 @@ export component AppWindow inherits Window {
                             padding: 18px;
                             spacing: 12px;
 
-                            // â”€â”€ Status / name / controls row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                            // ── Status / name / controls row ────────────────────────
                             HorizontalLayout {
                                 spacing: 10px;
-                                alignment: start;
 
                                 // Status dot
                                 VerticalLayout {
@@ -505,7 +476,7 @@ export component AppWindow inherits Window {
                                 // Auto-Connect checkbox
                                 AutoConnectBox {
                                     checked: t.auto_connect;
-                                    toggled(v) => { toggle_auto_connect(idx, v); }
+                                    toggled(v) => { toggle_auto_connect(t.id, v); }
                                 }
 
                                 Rectangle { width: 6px; }
@@ -526,12 +497,13 @@ export component AppWindow inherits Window {
                                     IconBtn {
                                         kind: "edit";
                                         clicked => {
-                                            if (selected_idx == idx) { selected_idx = -1; }
-                                            else { select_tunnel(idx); }
+                                            if (selected_id == t.id) { selected_id = ""; }
+                                            else { select_tunnel(t.id); }
                                         }
                                     }
 
-                                    IconBtn { kind: "copy"; clicked => { copy_tunnel(idx); } }
+                                    IconBtn { kind: "copy"; clicked => { copy_tunnel(t.id); } }
+                                    IconBtn { kind: "delete"; clicked => { delete_tunnel(t.id); } }
                                     IconBtn { kind: "more"; }
                                 }
                             }
@@ -579,8 +551,8 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            // â”€â”€ Expanded edit form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                            if (selected_idx == idx) : VerticalLayout {
+                            // ── Expanded edit form ────────────────────────
+                            if (selected_id == t.id) : VerticalLayout {
                                 spacing: 12px;
                                 padding-top: 10px;
 
@@ -613,7 +585,7 @@ export component AppWindow inherits Window {
                                         border-radius: 8px;
                                         background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
                                         Text { text: "Save Configuration"; font-size: 13px; font-weight: 700; color: white; horizontal-alignment: center; vertical-alignment: center; }
-                                        TouchArea { clicked => { save_config(edit_data); selected_idx = -1; } }
+                                        TouchArea { clicked => { save_config(edit_data); selected_id = ""; } }
                                     }
                                 }
                             }
