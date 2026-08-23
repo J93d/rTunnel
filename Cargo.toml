@@ -1,0 +1,15 @@
+[package]
+name = "rTunnel"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+keyring = "4.1.6"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+slint = "1.17.1"
+ssh2 = "0.9.6"
+uuid = { version = "1.25.0", features = ["v4"] }
+
+[build-dependencies]
+slint-build = "1.17.1"

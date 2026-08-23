@@ -1,0 +1,785 @@
+﻿import { CheckBox, LineEdit, ScrollView } from "std-widgets.slint";
+
+export struct TunnelData {
+    id: string,
+    name: string,
+    local_port: string,
+    proxy_host: string,
+    proxy_port: string,
+    proxy_username: string,
+    save_proxy_password: bool,
+    remote_host: string,
+    remote_port: string,
+    remote_username: string,
+    save_remote_password: bool,
+    target_host: string,
+    target_port: string,
+    auto_connect: bool,
+    is_running: bool,
+    uptime: string,
+    tx_rx: string,
+    signal: int,
+}
+
+export global Palette {
+    out property <color> bg-dark:      #181A22;
+    out property <color> sidebar:      #1B1D27;
+    out property <color> card:         #22242F;
+    out property <color> text-main:    #F0F2FF;
+    out property <color> text-sub:     #8B8FA8;
+    out property <color> accent:       #3EADFF;
+    out property <color> accent-dark:  #1E7ADE;
+    out property <color> active-green: #34D47F;
+    out property <color> inactive:     #4A4D60;
+    out property <color> border:       #2E3044;
+    out property <color> border-light: #3A3D55;
+}
+
+// â”€â”€ Play icon (right-pointing triangle) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+component PlayIcon inherits Path {
+    in property <color> icon-color: Palette.text-sub;
+    fill: icon-color;
+    width: 12px; height: 13px;
+    commands: "M 0 0 L 12 6.5 L 0 13 Z";
+}
+
+// â”€â”€ Stop icon (filled square) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+component StopIcon inherits Path {
+    in property <color> icon-color: Palette.text-sub;
+    fill: icon-color;
+    width: 11px; height: 11px;
+    commands: "M 0 0 L 11 0 L 11 11 L 0 11 Z";
+}
+
+// â”€â”€ Edit / pencil icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+component EditIcon inherits Path {
+    in property <color> icon-color: Palette.text-sub;
+    fill: transparent;
+    stroke: icon-color;
+    stroke-width: 1.4px;
+    width: 14px; height: 14px;
+    commands: "M 10 1 L 13 4 L 4 13 L 1 13 L 1 10 Z M 8.5 2.5 L 11.5 5.5";
+}
+
+// â”€â”€ Copy / duplicate icon (two overlapping pages) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+component CopyIcon inherits Path {
+    in property <color> icon-color: Palette.text-sub;
+    fill: transparent;
+    stroke: icon-color;
+    stroke-width: 1.4px;
+    width: 14px; height: 14px;
+    commands: "M 5 0 L 13 0 L 13 8 L 5 8 Z M 1 4 L 9 4 L 9 12 L 1 12 Z";
+}
+
+// â”€â”€ Three vertical dots for "more" â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+component MoreIcon inherits Rectangle {
+    in property <color> icon-color: Palette.text-sub;
+    background: transparent;
+    width: 4px; height: 18px;
+
+    Rectangle { x: 0px; y: 1px;  width: 4px; height: 4px; border-radius: 2px; background: icon-color; }
+    Rectangle { x: 0px; y: 7px;  width: 4px; height: 4px; border-radius: 2px; background: icon-color; }
+    Rectangle { x: 0px; y: 13px; width: 4px; height: 4px; border-radius: 2px; background: icon-color; }
+}
+
+// â”€â”€ Network / graph icon for sidebar brand â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+component NetworkIcon inherits Rectangle {
+    in property <color> icon-color: Palette.accent;
+    background: transparent;
+    width: 22px; height: 22px;
+
+    // Connecting lines (drawn as thin paths underneath nodes)
+    Path {
+        fill: transparent;
+        stroke: icon-color.with-alpha(0.55);
+        stroke-width: 1.5px;
+        width: 22px; height: 22px;
+        commands: "M 6 4 L 16 4 M 4 8 L 9 18 M 18 8 L 13 18";
+    }
+    // Node circles
+    Rectangle { x: 1px;  y: 1px;  width: 7px; height: 7px; border-radius: 3.5px; background: icon-color; }
+    Rectangle { x: 14px; y: 1px;  width: 7px; height: 7px; border-radius: 3.5px; background: icon-color; }
+    Rectangle { x: 7px;  y: 15px; width: 7px; height: 7px; border-radius: 3.5px; background: icon-color; }
+}
+
+// â”€â”€ Gear icon using Path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+component GearIcon inherits Rectangle {
+    in property <color> icon-color: Palette.text-sub;
+    background: transparent;
+    width: 20px; height: 20px;
+
+    Path {
+        fill: icon-color;
+        width: 20px; height: 20px;
+        // Simplified gear: outer ring + 8 teeth stubs
+        commands: "M 8 0 L 9 0 L 10 2 Q 11.5 2.3 12.8 3 L 14.5 2 L 15.5 3 L 14.5 4.7 Q 15.2 6 15.5 7.5 L 17.5 8 L 17.5 9 L 15.5 9.5 Q 15.2 11 14.5 12.3 L 15.5 14 L 14.5 15 L 12.8 14 Q 11.5 14.7 10 15 L 9 17 L 8 17 L 7 15 Q 5.5 14.7 4.2 14 L 2.5 15 L 1.5 14 L 2.5 12.3 Q 1.8 11 1.5 9.5 L -0.5 9 L -0.5 8 L 1.5 7.5 Q 1.8 6 2.5 4.7 L 1.5 3 L 2.5 2 L 4.2 3 Q 5.5 2.3 7 2 Z M 5.5 8.5 A 3 3 0 1 0 11.5 8.5 A 3 3 0 1 0 5.5 8.5";
+    }
+}
+
+// â”€â”€ Info circle icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+component InfoIcon inherits Rectangle {
+    in property <color> icon-color: Palette.text-sub;
+    background: transparent;
+    width: 20px; height: 20px;
+
+    // Outer circle
+    Path {
+        fill: transparent;
+        stroke: icon-color;
+        stroke-width: 1.5px;
+        width: 20px; height: 20px;
+        commands: "M 10 1 A 9 9 0 1 0 10.001 1 Z";
+    }
+    // "i" dot and stem
+    Rectangle { x: 9px; y: 5px; width: 2px; height: 2px; border-radius: 1px; background: icon-color; }
+    Rectangle { x: 9px; y: 9px; width: 2px; height: 6px; border-radius: 1px; background: icon-color; }
+}
+
+// â”€â”€ Signal bars â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+component SignalBars inherits HorizontalLayout {
+    in property <int> level;
+    spacing: 3px;
+    alignment: end;
+
+    Rectangle { width: 4px; height: 8px;  border-radius: 1.5px; background: level >= 1 ? Palette.active-green : Palette.inactive; }
+    Rectangle { width: 4px; height: 11px; border-radius: 1.5px; background: level >= 2 ? Palette.active-green : Palette.inactive; }
+    Rectangle { width: 4px; height: 14px; border-radius: 1.5px; background: level >= 3 ? Palette.active-green : Palette.inactive; }
+    Rectangle { width: 4px; height: 17px; border-radius: 1.5px; background: level >= 4 ? Palette.active-green : Palette.inactive; }
+}
+
+// â”€â”€ Icon button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// kind: "play" | "stop" | "edit" | "copy" | "more"
+component IconBtn inherits Rectangle {
+    in property <string> kind;
+    in property <bool>   highlighted: false;
+    callback clicked;
+
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    background: highlighted ? Palette.accent.with-alpha(0.15) : Palette.sidebar;
+    border-width: 1.5px;
+    border-color: highlighted ? Palette.accent : Palette.border;
+    animate border-color, background { duration: 180ms; }
+
+    if (kind == "play") : PlayIcon {
+        icon-color: highlighted ? Palette.accent : Palette.text-sub;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+    if (kind == "stop") : StopIcon {
+        icon-color: highlighted ? Palette.accent : Palette.text-sub;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+    if (kind == "edit") : EditIcon {
+        icon-color: Palette.text-sub;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+    if (kind == "copy") : CopyIcon {
+        icon-color: Palette.text-sub;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+    if (kind == "more") : MoreIcon {
+        icon-color: Palette.text-sub;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+// â”€â”€ Sidebar nav item â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// â”€â”€ Auto-Connect checkbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+component AutoConnectBox inherits HorizontalLayout {
+    in-out property <bool> checked;
+    callback toggled(bool);
+
+    spacing: 7px;
+    alignment: center;
+
+    Rectangle {
+        width: 16px; height: 16px;
+        border-radius: 4px;
+        border-width: 1.5px;
+        border-color: checked ? Palette.accent : Palette.border-light;
+        background: checked ? Palette.accent : transparent;
+        animate border-color, background { duration: 150ms; }
+
+        // Checkmark (only visible when checked) â€” drawn as two Path strokes
+        if checked : Path {
+            fill: transparent;
+            stroke: white;
+            stroke-width: 2px;
+            width: 10px; height: 8px;
+            x: 3px; y: 4px;
+            commands: "M 0 4 L 3.5 7.5 L 10 0";
+        }
+        TouchArea { clicked => { root.checked = !root.checked; root.toggled(root.checked); } }
+    }
+    Text {
+        text: "Auto-Connect";
+        font-size: 12px;
+        color: Palette.text-sub;
+        vertical-alignment: center;
+    }
+}
+
+// â”€â”€ Main window â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export component AppWindow inherits Window {
+    title: "rTunnel";
+    preferred-width: 920px;
+    preferred-height: 620px;
+    background: Palette.bg-dark;
+    default-font-family: "Segoe UI";
+
+    callback show_window();
+
+    in-out property <[TunnelData]> tunnels: [];
+    in-out property <int>          selected_idx: -1;
+    in-out property <TunnelData>   edit_data;
+
+    callback start_tunnel(string);
+    callback stop_tunnel(string);
+    callback save_config(TunnelData);
+    callback create_new();
+    callback select_tunnel(int);
+    callback copy_tunnel(int);
+    callback toggle_auto_connect(int, bool);
+
+    in-out property <bool>   show_password_prompt: false;
+    in-out property <string> prompt_tunnel_id;
+    in-out property <bool>   prompt_needs_proxy: false;
+    in-out property <bool>   prompt_needs_remote: false;
+    property <string>        prompt_proxy_pass;
+    property <string>        prompt_remote_pass;
+
+    in-out property <bool>   show_error_prompt: false;
+    in-out property <string> error_message;
+    callback show_error(string);
+    callback submit_passwords(string, string, string);
+
+    HorizontalLayout {
+
+        // â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        Rectangle {
+            width: 62px;
+            background: Palette.sidebar;
+
+            VerticalLayout {
+                padding-top: 16px;
+                padding-bottom: 16px;
+                spacing: 2px;
+                alignment: start;
+
+                // Brand / logo icon
+                Rectangle {
+                    width: 62px; height: 52px;
+                    background: transparent;
+                    NetworkIcon {
+                        icon-color: Palette.accent;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+
+                Rectangle { height: 8px; }
+
+                // Tunnels nav (active)
+                Rectangle {
+                    width: 62px; height: 48px;
+                    background: Palette.accent.with-alpha(0.10);
+
+                    // Active left bar
+                    Rectangle {
+                        width: 3px; height: 26px;
+                        x: 0px; y: 11px;
+                        background: Palette.accent;
+                        border-radius: 2px;
+                    }
+                    NetworkIcon {
+                        icon-color: Palette.accent;
+                        x: (parent.width - self.width) / 2 + 2px;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+
+                // Settings nav
+                Rectangle {
+                    width: 62px; height: 48px;
+                    background: transparent;
+                    GearIcon {
+                        icon-color: Palette.text-sub;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                // Info nav
+                Rectangle {
+                    width: 62px; height: 48px;
+                    background: transparent;
+                    InfoIcon {
+                        icon-color: Palette.text-sub;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+            }
+        }
+
+        // Sidebar divider
+        Rectangle { width: 1px; background: Palette.border; }
+
+        // â”€â”€ Main content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        VerticalLayout {
+
+            // â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            HorizontalLayout {
+                padding-left: 32px;
+                padding-right: 24px;
+                padding-top: 28px;
+                padding-bottom: 16px;
+
+                Text {
+                    text: "Tunnels";
+                    font-size: 32px;
+                    font-weight: 800;
+                    color: Palette.text-main;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // Add New Tunnel button
+                Rectangle {
+                    width: 164px; height: 44px;
+                    border-radius: 10px;
+                    background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
+                    drop-shadow-color: Palette.accent.with-alpha(0.4);
+                    drop-shadow-blur: 16px;
+                    drop-shadow-offset-y: 5px;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 7px;
+                        // Plus sign drawn as two rectangles
+                        Rectangle {
+                            width: 14px; height: 14px;
+                            background: transparent;
+                            Rectangle { x: 6px; y: 0px; width: 2px; height: 14px; background: white; border-radius: 1px; }
+                            Rectangle { x: 0px; y: 6px; width: 14px; height: 2px; background: white; border-radius: 1px; }
+                        }
+                        Text {
+                            text: "Add New Tunnel";
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: white;
+                            vertical-alignment: center;
+                        }
+                    }
+                    TouchArea { clicked => { create_new(); } }
+                }
+            }
+
+            // â”€â”€ Search / filter row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            HorizontalLayout {
+                alignment: end;
+                padding-right: 24px;
+                padding-bottom: 14px;
+                spacing: 10px;
+
+                // Search pill
+                Rectangle {
+                    width: 235px; height: 36px;
+                    border-radius: 18px;
+                    background: Palette.card;
+                    border-width: 1px;
+                    border-color: Palette.border;
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        spacing: 8px;
+                        alignment: start;
+
+                        // Magnifier icon
+                        Path {
+                            fill: transparent;
+                            stroke: Palette.text-sub;
+                            stroke-width: 1.5px;
+                            width: 14px; height: 14px;
+                            y: (parent.height - self.height) / 2;
+                            commands: "M 5.5 0 A 5.5 5.5 0 1 0 5.501 0 Z M 10 10 L 14 14";
+                        }
+
+                        TextInput {
+                            color: Palette.text-main;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Filter icon button (funnel)
+                Rectangle {
+                    width: 36px; height: 36px;
+                    border-radius: 18px;
+                    background: transparent;
+
+                    Path {
+                        fill: Palette.text-sub;
+                        width: 16px; height: 14px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        commands: "M 0 0 L 16 0 L 10 7 L 10 14 L 6 14 L 6 7 Z";
+                    }
+                    TouchArea {}
+                }
+            }
+
+            // â”€â”€ Tunnel cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            ScrollView {
+                vertical-stretch: 1;
+
+                VerticalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-bottom: 80px;
+                    spacing: 14px;
+
+                    for t[idx] in tunnels : Rectangle {
+                        border-radius: 12px;
+                        background: Palette.card;
+                        border-width: 1px;
+                        border-color: t.is_running ? Palette.accent.with-alpha(0.3) : Palette.border;
+                        drop-shadow-color: t.is_running ? Palette.accent.with-alpha(0.10) : #00000030;
+                        drop-shadow-blur: 14px;
+                        drop-shadow-offset-y: 4px;
+
+                        VerticalLayout {
+                            padding: 18px;
+                            spacing: 12px;
+
+                            // â”€â”€ Status / name / controls row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                            HorizontalLayout {
+                                spacing: 10px;
+                                alignment: start;
+
+                                // Status dot
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 11px; height: 11px;
+                                        border-radius: 6px;
+                                        background: t.is_running ? Palette.active-green : Palette.inactive;
+                                        drop-shadow-color: t.is_running ? Palette.active-green.with-alpha(0.65) : transparent;
+                                        drop-shadow-blur: t.is_running ? 8px : 0px;
+                                    }
+                                }
+
+                                // Status label
+                                Text {
+                                    text: t.is_running ? "ACTIVE" : "DISCONNECTED";
+                                    color: t.is_running ? Palette.active-green : Palette.inactive;
+                                    font-size: 10.5px;
+                                    font-weight: 800;
+                                    vertical-alignment: center;
+                                    width: 94px;
+                                }
+
+                                // Tunnel name
+                                Text {
+                                    text: t.name;
+                                    font-size: 16px;
+                                    font-weight: 700;
+                                    color: Palette.text-main;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                // Auto-Connect checkbox
+                                AutoConnectBox {
+                                    checked: t.auto_connect;
+                                    toggled(v) => { toggle_auto_connect(idx, v); }
+                                }
+
+                                Rectangle { width: 6px; }
+
+                                // Action buttons
+                                HorizontalLayout {
+                                    spacing: 7px;
+
+                                    IconBtn {
+                                        kind: t.is_running ? "stop" : "play";
+                                        highlighted: t.is_running;
+                                        clicked => {
+                                            if (t.is_running) { stop_tunnel(t.id); }
+                                            else { start_tunnel(t.id); }
+                                        }
+                                    }
+
+                                    IconBtn {
+                                        kind: "edit";
+                                        clicked => {
+                                            if (selected_idx == idx) { selected_idx = -1; }
+                                            else { select_tunnel(idx); }
+                                        }
+                                    }
+
+                                    IconBtn { kind: "copy"; clicked => { copy_tunnel(idx); } }
+                                    IconBtn { kind: "more"; }
+                                }
+                            }
+
+                            // â”€â”€ Route topology line â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                            Text {
+                                text: "Local: " + t.local_port + "  →  " + t.proxy_host + "  →  remote:" + t.target_port;
+                                color: Palette.text-sub;
+                                font-size: 12.5px;
+                                x: 21px;
+                            }
+
+                            // Divider
+                            Rectangle { height: 1px; background: Palette.border; }
+
+                            // â”€â”€ Telemetry row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                            HorizontalLayout {
+                                spacing: 10px;
+
+                                Text {
+                                    text: "Uptime: " + t.uptime;
+                                    color: Palette.text-sub;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    width: 1px; height: 12px;
+                                    background: Palette.border-light;
+                                    y: 2px;
+                                }
+                                Text {
+                                    text: t.is_running ? "Data RX/TX: " + t.tx_rx : "Never Connected";
+                                    color: Palette.text-sub;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                if t.is_running : SignalBars { level: t.signal; }
+                                if !t.is_running : Text {
+                                    text: "Never Connected";
+                                    color: Palette.text-sub;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // â”€â”€ Expanded edit form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                            if (selected_idx == idx) : VerticalLayout {
+                                spacing: 12px;
+                                padding-top: 10px;
+
+                                Rectangle { height: 1px; background: Palette.border; }
+
+                                Text { text: "General"; font-weight: 700; color: Palette.text-main; font-size: 13px; }
+                                HorizontalLayout { spacing: 10px; Text { text: "Name:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.name; } }
+                                HorizontalLayout { spacing: 10px; Text { text: "Local Port:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.local_port; } }
+
+                                Text { text: "Proxy SSH Server"; font-weight: 700; color: Palette.text-main; font-size: 13px; }
+                                HorizontalLayout { spacing: 10px; Text { text: "Host:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.proxy_host; } }
+                                HorizontalLayout { spacing: 10px; Text { text: "Port:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.proxy_port; } }
+                                HorizontalLayout { spacing: 10px; Text { text: "Username:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.proxy_username; } }
+                                HorizontalLayout { spacing: 10px; CheckBox { text: "Save Password"; checked <=> edit_data.save_proxy_password; } }
+
+                                Text { text: "Remote SSH Server"; font-weight: 700; color: Palette.text-main; font-size: 13px; }
+                                HorizontalLayout { spacing: 10px; Text { text: "Host:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.remote_host; } }
+                                HorizontalLayout { spacing: 10px; Text { text: "Port:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.remote_port; } }
+                                HorizontalLayout { spacing: 10px; Text { text: "Username:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.remote_username; } }
+                                HorizontalLayout { spacing: 10px; CheckBox { text: "Save Password"; checked <=> edit_data.save_remote_password; } }
+
+                                Text { text: "Target Destination"; font-weight: 700; color: Palette.text-main; font-size: 13px; }
+                                HorizontalLayout { spacing: 10px; Text { text: "Host:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.target_host; } }
+                                HorizontalLayout { spacing: 10px; Text { text: "Port:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.target_port; } }
+
+                                HorizontalLayout {
+                                    alignment: end;
+                                    Rectangle {
+                                        width: 160px; height: 36px;
+                                        border-radius: 8px;
+                                        background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
+                                        Text { text: "Save Configuration"; font-size: 13px; font-weight: 700; color: white; horizontal-alignment: center; vertical-alignment: center; }
+                                        TouchArea { clicked => { save_config(edit_data); selected_idx = -1; } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // â”€â”€ Status bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            Rectangle { height: 1px; background: Palette.border; }
+            Rectangle {
+                height: 30px;
+                background: Palette.sidebar;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 12px;
+
+                    Text { text: "rTunnel v1.2"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
+                    Text { text: "|"; color: Palette.border-light; font-size: 11px; vertical-alignment: center; }
+                    Text { text: "Connection Engine Active"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
+                    Text { text: "|"; color: Palette.border-light; font-size: 11px; vertical-alignment: center; }
+                    Text { text: "Tunnels: 3 Active, 1 Stopped"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    // Compact mode / resize icon (two overlapping squares)
+                    Path {
+                        fill: Palette.text-sub;
+                        width: 14px; height: 14px;
+                        y: (parent.height - self.height) / 2;
+                        commands: "M 0 4 L 10 4 L 10 14 L 0 14 Z M 4 0 L 14 0 L 14 10 L 4 10 Z";
+                    }
+                }
+            }
+        }
+    }
+
+    // â”€â”€ Floating Action Button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    Rectangle {
+        x: parent.width - 76px;
+        y: parent.height - 96px;
+        width: 54px; height: 54px;
+        border-radius: 27px;
+        background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
+        drop-shadow-color: Palette.accent.with-alpha(0.55);
+        drop-shadow-blur: 20px;
+        drop-shadow-offset-y: 6px;
+
+        // Plus icon
+        Rectangle { x: 26px; y: 13px; width: 2px; height: 28px; background: white; border-radius: 1px; }
+        Rectangle { x: 13px; y: 26px; width: 28px; height: 2px; background: white; border-radius: 1px; }
+
+        TouchArea { clicked => { create_new(); } }
+    }
+
+    // â”€â”€ Sparkle / AI indicator near FAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    Path {
+        x: parent.width - 108px;
+        y: parent.height - 106px;
+        fill: Palette.accent.with-alpha(0.8);
+        width: 18px; height: 18px;
+        // 4-pointed star
+        commands: "M 9 0 L 10.5 7.5 L 18 9 L 10.5 10.5 L 9 18 L 7.5 10.5 L 0 9 L 7.5 7.5 Z";
+    }
+
+    // â”€â”€ Password prompt overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (show_password_prompt) : Rectangle {
+        background: #00000099;
+        TouchArea { }
+
+        Rectangle {
+            width: 360px; height: 260px;
+            border-radius: 12px;
+            background: Palette.card;
+            border-width: 1px;
+            border-color: Palette.border-light;
+            drop-shadow-color: #00000060;
+            drop-shadow-blur: 32px;
+            drop-shadow-offset-y: 10px;
+
+            VerticalLayout {
+                padding: 24px; spacing: 16px;
+
+                Text { text: "Authentication Required"; font-weight: 700; color: Palette.text-main; font-size: 15px; }
+                if (prompt_needs_proxy) : HorizontalLayout {
+                    Text { text: "Proxy Pass:"; width: 100px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; }
+                    LineEdit { input-type: password; text <=> prompt_proxy_pass; }
+                }
+                if (prompt_needs_remote) : HorizontalLayout {
+                    Text { text: "Remote Pass:"; width: 100px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; }
+                    LineEdit { input-type: password; text <=> prompt_remote_pass; }
+                }
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout {
+                    spacing: 10px; alignment: end;
+                    Rectangle {
+                        width: 80px; height: 34px;
+                        border-radius: 8px; background: Palette.sidebar;
+                        border-width: 1px; border-color: Palette.border;
+                        Text { text: "Cancel"; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; color: Palette.text-sub; }
+                        TouchArea { clicked => { show_password_prompt = false; } }
+                    }
+                    Rectangle {
+                        width: 90px; height: 34px;
+                        border-radius: 8px;
+                        background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
+                        Text { text: "Connect"; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; color: white; }
+                        TouchArea {
+                            clicked => {
+                                show_password_prompt = false;
+                                submit_passwords(prompt_tunnel_id, prompt_proxy_pass, prompt_remote_pass);
+                                prompt_proxy_pass = "";
+                                prompt_remote_pass = "";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // â”€â”€ Error overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (show_error_prompt) : Rectangle {
+        background: #00000099;
+        TouchArea { }
+
+        Rectangle {
+            width: 420px; height: 210px;
+            border-radius: 12px;
+            background: Palette.card;
+            border-width: 1px; border-color: #ef4444;
+            drop-shadow-color: #ef444440;
+            drop-shadow-blur: 24px; drop-shadow-offset-y: 8px;
+
+            VerticalLayout {
+                padding: 24px; spacing: 14px;
+
+                Text { text: "Connection Error"; font-weight: 700; color: #ef4444; font-size: 15px; }
+                ScrollView {
+                    width: 100%;
+                    Text { text: error_message; wrap: word-wrap; color: Palette.text-main; width: 374px; font-size: 13px; }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    Rectangle {
+                        width: 90px; height: 34px;
+                        border-radius: 8px; background: Palette.sidebar;
+                        border-width: 1px; border-color: Palette.border;
+                        Text { text: "Dismiss"; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; color: Palette.text-sub; }
+                        TouchArea { clicked => { show_error_prompt = false; } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component AppTray inherits SystemTrayIcon {
+    icon: @image-url("tray_icon.png");
+    tooltip: "rTunnel - SSH Tunnel Manager";
+
+    callback show-window();
+    callback quit();
+
+    Menu {
+        MenuItem { title: "Show rTunnel"; activated => { show-window(); } }
+        MenuItem { title: "Quit"; activated => { quit(); } }
+    }
+}
