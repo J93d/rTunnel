@@ -4,10 +4,6 @@ pub fn get_proxy_service_name(id: &str) -> String {
     format!("rTunnel_{}_proxy", id)
 }
 
-pub fn get_remote_service_name(id: &str) -> String {
-    format!("rTunnel_{}_remote", id)
-}
-
 pub fn save_password(service: &str, username: &str, password: &str) -> Result<(), String> {
     let entry = Entry::new(service, username).map_err(|e| e.to_string())?;
     entry.set_password(password).map_err(|e| e.to_string())

@@ -8,10 +8,7 @@ export struct TunnelData {
     proxy_port: string,
     proxy_username: string,
     save_proxy_password: bool,
-    remote_host: string,
-    remote_port: string,
-    remote_username: string,
-    save_remote_password: bool,
+
     target_host: string,
     target_port: string,
     auto_connect: bool,
@@ -19,6 +16,12 @@ export struct TunnelData {
     uptime: string,
     tx_rx: string,
     signal: int,
+}
+
+export struct AppSettings {
+    connection_timeout: string,
+    minimize_to_tray: bool,
+    start_on_boot: bool,
 }
 
 export global Palette {
@@ -92,24 +95,26 @@ component MoreIcon inherits Rectangle {
     Rectangle { x: 0px; y: 13px; width: 4px; height: 4px; border-radius: 2px; background: icon-color; }
 }
 
-// â”€â”€ Network / graph icon for sidebar brand â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Network / graph icon for sidebar brand ──────────────────────────────
 component NetworkIcon inherits Rectangle {
     in property <color> icon-color: Palette.accent;
     background: transparent;
-    width: 22px; height: 22px;
+    width: 24px; height: 24px;
 
-    // Connecting lines (drawn as thin paths underneath nodes)
     Path {
         fill: transparent;
-        stroke: icon-color.with-alpha(0.55);
+        stroke: icon-color;
         stroke-width: 1.5px;
-        width: 22px; height: 22px;
-        commands: "M 6 4 L 16 4 M 4 8 L 9 18 M 18 8 L 13 18";
+        width: 100%; height: 100%;
+        viewbox-width: 24; viewbox-height: 24;
+        commands: "M 12 12 L 12 4 M 12 12 L 4 10 M 12 12 L 7 20 M 12 12 L 19 16 M 12 4 L 4 10 M 4 10 L 7 20 M 7 20 L 19 16 M 12 4 L 19 16";
     }
     // Node circles
-    Rectangle { x: 1px;  y: 1px;  width: 7px; height: 7px; border-radius: 3.5px; background: icon-color; }
-    Rectangle { x: 14px; y: 1px;  width: 7px; height: 7px; border-radius: 3.5px; background: icon-color; }
-    Rectangle { x: 7px;  y: 15px; width: 7px; height: 7px; border-radius: 3.5px; background: icon-color; }
+    Rectangle { x: parent.width * (7.5/24); y: parent.height * (7.5/24); width: parent.width * (9/24); height: parent.height * (9/24); border-radius: self.width/2; background: Palette.bg-dark; border-width: 2px; border-color: icon-color; }
+    Rectangle { x: parent.width * (10/24); y: parent.height * (1/24); width: parent.width * (6/24); height: parent.height * (6/24); border-radius: self.width/2; background: Palette.bg-dark; border-width: 1.5px; border-color: icon-color; }
+    Rectangle { x: parent.width * (1/24); y: parent.height * (7/24); width: parent.width * (6/24); height: parent.height * (6/24); border-radius: self.width/2; background: Palette.bg-dark; border-width: 1.5px; border-color: icon-color; }
+    Rectangle { x: parent.width * (4/24); y: parent.height * (17/24); width: parent.width * (6/24); height: parent.height * (6/24); border-radius: self.width/2; background: Palette.bg-dark; border-width: 1.5px; border-color: icon-color; }
+    Rectangle { x: parent.width * (17/24); y: parent.height * (14/24); width: parent.width * (6/24); height: parent.height * (6/24); border-radius: self.width/2; background: Palette.bg-dark; border-width: 1.5px; border-color: icon-color; }
 }
 
 // â”€â”€ Gear icon using Path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -257,10 +262,13 @@ export component AppWindow inherits Window {
     in-out property <string>       selected_id: "";
     in-out property <TunnelData>   edit_data;
     in-out property <string>       search_text: "";
+    in-out property <string>       active_tab: "tunnels";
+    in-out property <AppSettings>  settings;
 
     callback start_tunnel(string);
     callback stop_tunnel(string);
     callback save_config(TunnelData);
+    callback save_settings(AppSettings);
     callback create_new();
     callback select_tunnel(string);
     callback copy_tunnel(string);
@@ -271,14 +279,14 @@ export component AppWindow inherits Window {
     in-out property <bool>   show_password_prompt: false;
     in-out property <string> prompt_tunnel_id;
     in-out property <bool>   prompt_needs_proxy: false;
-    in-out property <bool>   prompt_needs_remote: false;
     property <string>        prompt_proxy_pass;
-    property <string>        prompt_remote_pass;
 
     in-out property <bool>   show_error_prompt: false;
     in-out property <string> error_message;
     callback show_error(string);
-    callback submit_passwords(string, string, string);
+    callback submit_passwords(string, string);
+
+    in-out property <bool>   show_info_prompt: false;
 
     HorizontalLayout {
 
@@ -293,47 +301,44 @@ export component AppWindow inherits Window {
                 spacing: 2px;
                 alignment: start;
 
-                // Brand / logo icon
-                Rectangle {
-                    width: 62px; height: 52px;
-                    background: transparent;
-                    NetworkIcon {
-                        icon-color: Palette.accent;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                    }
-                }
-
-                Rectangle { height: 8px; }
-
                 // Tunnels nav (active)
                 Rectangle {
                     width: 62px; height: 48px;
-                    background: Palette.accent.with-alpha(0.10);
+                    background: active_tab == "tunnels" ? Palette.accent.with-alpha(0.10) : transparent;
 
                     // Active left bar
-                    Rectangle {
+                    if active_tab == "tunnels" : Rectangle {
                         width: 3px; height: 26px;
                         x: 0px; y: 11px;
                         background: Palette.accent;
                         border-radius: 2px;
                     }
                     NetworkIcon {
-                        icon-color: Palette.accent;
-                        x: (parent.width - self.width) / 2 + 2px;
+                        icon-color: active_tab == "tunnels" ? Palette.accent : Palette.text-sub;
+                        x: (parent.width - self.width) / 2 + (active_tab == "tunnels" ? 2px : 0px);
                         y: (parent.height - self.height) / 2;
                     }
+                    TouchArea { clicked => { active_tab = "tunnels"; } }
                 }
 
                 // Settings nav
                 Rectangle {
                     width: 62px; height: 48px;
-                    background: transparent;
+                    background: active_tab == "settings" ? Palette.accent.with-alpha(0.10) : transparent;
+                    
+                    if active_tab == "settings" : Rectangle {
+                        width: 3px; height: 26px;
+                        x: 0px; y: 11px;
+                        background: Palette.accent;
+                        border-radius: 2px;
+                    }
+
                     GearIcon {
-                        icon-color: Palette.text-sub;
-                        x: (parent.width - self.width) / 2;
+                        icon-color: active_tab == "settings" ? Palette.accent : Palette.text-sub;
+                        x: (parent.width - self.width) / 2 + (active_tab == "settings" ? 2px : 0px);
                         y: (parent.height - self.height) / 2;
                     }
+                    TouchArea { clicked => { active_tab = "settings"; } }
                 }
 
                 Rectangle { vertical-stretch: 1; }
@@ -347,6 +352,7 @@ export component AppWindow inherits Window {
                         x: (parent.width - self.width) / 2;
                         y: (parent.height - self.height) / 2;
                     }
+                    TouchArea { clicked => { show_info_prompt = true; } }
                 }
             }
         }
@@ -365,7 +371,7 @@ export component AppWindow inherits Window {
                 padding-bottom: 16px;
 
                 Text {
-                    text: "Tunnels";
+                    text: active_tab == "tunnels" ? "Tunnels" : "Settings";
                     font-size: 32px;
                     font-family: "Roboto";
                     font-weight: 800;
@@ -376,7 +382,7 @@ export component AppWindow inherits Window {
                 Rectangle { horizontal-stretch: 1; }
 
                 // Search pill
-                Rectangle {
+                if active_tab == "tunnels" : Rectangle {
                     width: 235px; height: 36px;
                     border-radius: 18px;
                     background: Palette.card;
@@ -414,7 +420,7 @@ export component AppWindow inherits Window {
             }
 
             // ── Tunnel cards ────────────────────────────────────────────────────────────
-            ScrollView {
+            if active_tab == "tunnels" : ScrollView {
                 vertical-stretch: 1;
 
                 VerticalLayout {
@@ -508,18 +514,36 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            // â”€â”€ Route topology line â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                            Text {
-                                text: "Local: " + t.local_port + "  →  " + t.proxy_host + "  →  remote:" + t.target_port;
-                                color: Palette.text-sub;
-                                font-size: 12.5px;
+                            // ── Route topology line ─────────────────────────
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
                                 x: 21px;
+
+                                Text {
+                                    text: "Local: " + t.local_port + "   " + t.proxy_host;
+                                    color: Palette.text-sub;
+                                    font-size: 12.5px;
+                                    vertical-alignment: center;
+                                }
+
+                                NetworkIcon {
+                                    width: 16px; height: 16px;
+                                    icon-color: t.is_running ? Palette.accent : Palette.inactive;
+                                }
+
+                                Text {
+                                    text: t.target_host + ":" + t.target_port;
+                                    color: Palette.text-sub;
+                                    font-size: 12.5px;
+                                    vertical-alignment: center;
+                                }
                             }
 
                             // Divider
                             Rectangle { height: 1px; background: Palette.border; }
 
-                            // â”€â”€ Telemetry row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                            // ── Telemetry row ───────────────────────────────
                             HorizontalLayout {
                                 spacing: 10px;
 
@@ -568,11 +592,6 @@ export component AppWindow inherits Window {
                                 HorizontalLayout { spacing: 10px; Text { text: "Username:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.proxy_username; } }
                                 HorizontalLayout { spacing: 10px; CheckBox { text: "Save Password"; checked <=> edit_data.save_proxy_password; } }
 
-                                Text { text: "Remote SSH Server"; font-weight: 700; color: Palette.text-main; font-size: 13px; }
-                                HorizontalLayout { spacing: 10px; Text { text: "Host:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.remote_host; } }
-                                HorizontalLayout { spacing: 10px; Text { text: "Port:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.remote_port; } }
-                                HorizontalLayout { spacing: 10px; Text { text: "Username:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.remote_username; } }
-                                HorizontalLayout { spacing: 10px; CheckBox { text: "Save Password"; checked <=> edit_data.save_remote_password; } }
 
                                 Text { text: "Target Destination"; font-weight: 700; color: Palette.text-main; font-size: 13px; }
                                 HorizontalLayout { spacing: 10px; Text { text: "Host:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.target_host; } }
@@ -594,7 +613,65 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // â”€â”€ Status bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── Settings view ────────────────────────────────────────────────────────
+            if active_tab == "settings" : ScrollView {
+                vertical-stretch: 1;
+
+                VerticalLayout {
+                    alignment: start;
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-bottom: 20px;
+                    spacing: 14px;
+
+                    Rectangle {
+                        border-radius: 12px;
+                        background: Palette.card;
+                        border-width: 1px;
+                        border-color: Palette.border;
+                        
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 16px;
+
+                            Text { text: "Application Settings"; font-weight: 700; color: Palette.text-main; font-size: 16px; }
+                            
+                            Rectangle { height: 1px; background: Palette.border; }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "Connection Timeout (s):"; width: 160px; vertical-alignment: center; color: Palette.text-sub; font-size: 14px; }
+                                LineEdit { text <=> settings.connection_timeout; width: 100px; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                CheckBox { text: "Minimize to Tray on Close"; checked <=> settings.minimize_to_tray; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                CheckBox { text: "Start on Boot"; checked <=> settings.start_on_boot; }
+                            }
+
+                            Rectangle { height: 20px; }
+                            
+                            HorizontalLayout {
+                                alignment: start;
+                                Rectangle {
+                                    width: 140px; height: 36px;
+                                    border-radius: 8px;
+                                    background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
+                                    Text { text: "Save Settings"; font-size: 13px; font-weight: 700; color: white; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { save_settings(settings); } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Status bar ───────────────────────────────────────────────────────────
             Rectangle { height: 1px; background: Palette.border; }
             Rectangle {
                 height: 30px;
@@ -630,25 +707,12 @@ export component AppWindow inherits Window {
         width: 54px; height: 54px;
         border-radius: 27px;
         background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
-        drop-shadow-color: Palette.accent.with-alpha(0.55);
-        drop-shadow-blur: 20px;
-        drop-shadow-offset-y: 6px;
 
         // Plus icon
         Rectangle { x: 26px; y: 13px; width: 2px; height: 28px; background: white; border-radius: 1px; }
         Rectangle { x: 13px; y: 26px; width: 28px; height: 2px; background: white; border-radius: 1px; }
 
         TouchArea { clicked => { create_new(); } }
-    }
-
-    // â”€â”€ Sparkle / AI indicator near FAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    Path {
-        x: parent.width - 108px;
-        y: parent.height - 106px;
-        fill: Palette.accent.with-alpha(0.8);
-        width: 18px; height: 18px;
-        // 4-pointed star
-        commands: "M 9 0 L 10.5 7.5 L 18 9 L 10.5 10.5 L 9 18 L 7.5 10.5 L 0 9 L 7.5 7.5 Z";
     }
 
     // â”€â”€ Password prompt overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -674,10 +738,6 @@ export component AppWindow inherits Window {
                     Text { text: "Proxy Pass:"; width: 100px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; }
                     LineEdit { input-type: password; text <=> prompt_proxy_pass; }
                 }
-                if (prompt_needs_remote) : HorizontalLayout {
-                    Text { text: "Remote Pass:"; width: 100px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; }
-                    LineEdit { input-type: password; text <=> prompt_remote_pass; }
-                }
                 Rectangle { vertical-stretch: 1; }
                 HorizontalLayout {
                     spacing: 10px; alignment: end;
@@ -696,9 +756,8 @@ export component AppWindow inherits Window {
                         TouchArea {
                             clicked => {
                                 show_password_prompt = false;
-                                submit_passwords(prompt_tunnel_id, prompt_proxy_pass, prompt_remote_pass);
+                                submit_passwords(prompt_tunnel_id, prompt_proxy_pass);
                                 prompt_proxy_pass = "";
-                                prompt_remote_pass = "";
                             }
                         }
                     }
@@ -741,10 +800,45 @@ export component AppWindow inherits Window {
             }
         }
     }
+
+    // ── Info overlay ────────────────────────────────────────────────────────
+    if (show_info_prompt) : Rectangle {
+        background: #00000099;
+        TouchArea { }
+
+        Rectangle {
+            width: 420px; height: 210px;
+            border-radius: 12px;
+            background: Palette.card;
+            border-width: 1px; border-color: Palette.border-light;
+            drop-shadow-color: #00000060;
+            drop-shadow-blur: 32px; drop-shadow-offset-y: 10px;
+
+            VerticalLayout {
+                padding: 24px; spacing: 14px;
+
+                Text { text: "About rTunnel"; font-weight: 700; color: Palette.text-main; font-size: 15px; }
+                ScrollView {
+                    width: 100%;
+                    Text { text: "rTunnel is a robust SSH Tunnel Manager designed to securely route your traffic.\n\nVersion: v1.2\nLicense: MIT and Apache 2.0"; wrap: word-wrap; color: Palette.text-sub; width: 374px; font-size: 13px; }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    Rectangle {
+                        width: 90px; height: 34px;
+                        border-radius: 8px; background: Palette.sidebar;
+                        border-width: 1px; border-color: Palette.border;
+                        Text { text: "Close"; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; color: Palette.text-sub; }
+                        TouchArea { clicked => { show_info_prompt = false; } }
+                    }
+                }
+            }
+        }
+    }
 }
 
 export component AppTray inherits SystemTrayIcon {
-    icon: @image-url("tray_icon.png");
+    icon: @image-url("tray_icon.svg");
     tooltip: "rTunnel - SSH Tunnel Manager";
 
     callback show-window();

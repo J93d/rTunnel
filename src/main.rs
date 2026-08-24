@@ -4,7 +4,9 @@ mod config;
 mod keyring_manager;
 mod tunnel;
 
-use config::{TunnelConfig, load_configs, save_configs};
+use config::{
+    AppConfig, TunnelConfig, load_app_config, load_configs, save_app_config, save_configs,
+};
 use slint::{ModelRc, SharedString, VecModel};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -30,10 +32,6 @@ fn config_to_data(c: &TunnelConfig, is_running: bool) -> TunnelData {
         proxy_port: r2s(&c.proxy_port.to_string()),
         proxy_username: r2s(&c.proxy_username),
         save_proxy_password: c.save_proxy_password,
-        remote_host: r2s(&c.remote_host),
-        remote_port: r2s(&c.remote_port.to_string()),
-        remote_username: r2s(&c.remote_username),
-        save_remote_password: c.save_remote_password,
         target_host: r2s(&c.target_host),
         target_port: r2s(&c.target_port.to_string()),
         auto_connect: c.auto_connect,
@@ -61,13 +59,25 @@ fn data_to_config(d: &TunnelData) -> TunnelConfig {
         proxy_port: s2r(d.proxy_port.clone()).parse().unwrap_or(22),
         proxy_username: s2r(d.proxy_username.clone()),
         save_proxy_password: d.save_proxy_password,
-        remote_host: s2r(d.remote_host.clone()),
-        remote_port: s2r(d.remote_port.clone()).parse().unwrap_or(22),
-        remote_username: s2r(d.remote_username.clone()),
-        save_remote_password: d.save_remote_password,
         target_host: s2r(d.target_host.clone()),
         target_port: s2r(d.target_port.clone()).parse().unwrap_or(80),
         auto_connect: d.auto_connect,
+    }
+}
+
+fn app_config_to_settings(c: &AppConfig) -> AppSettings {
+    AppSettings {
+        connection_timeout: r2s(&c.connection_timeout.to_string()),
+        minimize_to_tray: c.minimize_to_tray,
+        start_on_boot: c.start_on_boot,
+    }
+}
+
+fn settings_to_app_config(s: &AppSettings) -> AppConfig {
+    AppConfig {
+        connection_timeout: s2r(s.connection_timeout.clone()).parse().unwrap_or(10),
+        minimize_to_tray: s.minimize_to_tray,
+        start_on_boot: s.start_on_boot,
     }
 }
 
@@ -87,6 +97,9 @@ fn main() {
         configs: load_configs(),
         running_tunnels: HashMap::new(),
     }));
+
+    let app_config = load_app_config();
+    app.set_settings(app_config_to_settings(&app_config));
 
     let tunnels_model = Rc::new(VecModel::default());
     app.set_tunnels(ModelRc::from(tunnels_model.clone()));
@@ -147,12 +160,6 @@ fn main() {
                 &updated.proxy_username,
             );
         }
-        if !updated.save_remote_password {
-            let _ = keyring_manager::delete_password(
-                &keyring_manager::get_remote_service_name(&updated.id),
-                &updated.remote_username,
-            );
-        }
 
         if let Some(pos) = st.configs.iter().position(|c| c.id == updated.id) {
             st.configs[pos] = updated.clone();
@@ -164,6 +171,11 @@ fn main() {
             app.set_selected_id("".into());
             app.invoke_update_search();
         }
+    });
+
+    app.on_save_settings(move |settings: AppSettings| {
+        let updated = settings_to_app_config(&settings);
+        let _ = save_app_config(&updated);
     });
 
     let state_clone = state.clone();
@@ -224,10 +236,6 @@ fn main() {
                 &keyring_manager::get_proxy_service_name(&id_str),
                 &c.proxy_username,
             );
-            let _ = keyring_manager::delete_password(
-                &keyring_manager::get_remote_service_name(&id_str),
-                &c.remote_username,
-            );
             st.configs.remove(pos);
             let _ = save_configs(&st.configs);
 
@@ -246,107 +254,82 @@ fn main() {
     app.on_start_tunnel(move |id: SharedString| {
         let id = s2r(id);
 
-        let (needs_proxy, needs_remote, proxy_pass, remote_pass) = {
+        let (needs_proxy, proxy_pass) = {
             let st = state_clone.lock().unwrap();
             if let Some(c) = st.configs.iter().find(|x| x.id == id) {
                 let proxy_user = c.proxy_username.clone();
-                let remote_user = c.remote_username.clone();
 
                 let proxy_pass = keyring_manager::get_password(
                     &keyring_manager::get_proxy_service_name(&id),
                     &proxy_user,
                 )
                 .unwrap_or_default();
-                let remote_pass = keyring_manager::get_password(
-                    &keyring_manager::get_remote_service_name(&id),
-                    &remote_user,
-                )
-                .unwrap_or_default();
 
                 let needs_proxy = proxy_pass.is_empty();
-                let needs_remote = remote_pass.is_empty();
 
-                (needs_proxy, needs_remote, proxy_pass, remote_pass)
+                (needs_proxy, proxy_pass)
             } else {
                 return;
             }
         };
 
         if let Some(app) = app_weak.upgrade() {
-            if needs_proxy || needs_remote {
+            if needs_proxy {
                 app.set_prompt_tunnel_id(r2s(&id));
                 app.set_prompt_needs_proxy(needs_proxy);
-                app.set_prompt_needs_remote(needs_remote);
                 app.set_show_password_prompt(true);
             } else {
-                app.invoke_submit_passwords(r2s(&id), r2s(&proxy_pass), r2s(&remote_pass));
+                app.invoke_submit_passwords(r2s(&id), r2s(&proxy_pass));
             }
         }
     });
 
     let state_clone = state.clone();
     let app_weak = app.as_weak();
-    app.on_submit_passwords(
-        move |id: SharedString, p_pass: SharedString, r_pass: SharedString| {
-            let id = s2r(id);
-            let mut p_pass = s2r(p_pass);
-            let mut r_pass = s2r(r_pass);
+    app.on_submit_passwords(move |id: SharedString, p_pass: SharedString| {
+        let id = s2r(id);
+        let mut p_pass = s2r(p_pass);
 
-            let mut st = state_clone.lock().unwrap();
-            if let Some(c) = st.configs.iter().find(|x| x.id == id).cloned() {
-                if p_pass.is_empty() {
-                    p_pass = keyring_manager::get_password(
-                        &keyring_manager::get_proxy_service_name(&id),
-                        &c.proxy_username,
-                    )
-                    .unwrap_or_default();
-                } else if c.save_proxy_password {
-                    let _ = keyring_manager::save_password(
-                        &keyring_manager::get_proxy_service_name(&id),
-                        &c.proxy_username,
-                        &p_pass,
-                    );
-                }
+        let mut st = state_clone.lock().unwrap();
+        if let Some(c) = st.configs.iter().find(|x| x.id == id).cloned() {
+            if p_pass.is_empty() {
+                p_pass = keyring_manager::get_password(
+                    &keyring_manager::get_proxy_service_name(&id),
+                    &c.proxy_username,
+                )
+                .unwrap_or_default();
+            } else if c.save_proxy_password {
+                let _ = keyring_manager::save_password(
+                    &keyring_manager::get_proxy_service_name(&id),
+                    &c.proxy_username,
+                    &p_pass,
+                );
+            }
 
-                if r_pass.is_empty() {
-                    r_pass = keyring_manager::get_password(
-                        &keyring_manager::get_remote_service_name(&id),
-                        &c.remote_username,
-                    )
-                    .unwrap_or_default();
-                } else if c.save_remote_password {
-                    let _ = keyring_manager::save_password(
-                        &keyring_manager::get_remote_service_name(&id),
-                        &c.remote_username,
-                        &r_pass,
-                    );
-                }
+            let is_running = Arc::new(AtomicBool::new(true));
+            st.running_tunnels.insert(id.clone(), is_running.clone());
 
-                let is_running = Arc::new(AtomicBool::new(true));
-                st.running_tunnels.insert(id.clone(), is_running.clone());
+            let id_clone = id.clone();
+            let app_w = app_weak.clone();
+            thread::spawn(move || {
+                let result = tunnel::start_tunnel(c, p_pass, is_running);
 
-                let id_clone = id.clone();
-                let app_w = app_weak.clone();
-                thread::spawn(move || {
-                    let result = tunnel::start_tunnel(c, p_pass, r_pass, is_running);
-
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(app) = app_w.upgrade() {
-                            if let Err(e) = result {
-                                app.set_error_message(r2s(&e));
-                                app.set_show_error_prompt(true);
-                            }
-                            app.invoke_stop_tunnel(r2s(&id_clone));
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(app) = app_w.upgrade() {
+                        if let Err(e) = result {
+                            app.set_error_message(r2s(&e));
+                            app.set_show_error_prompt(true);
                         }
-                    });
+                        app.invoke_stop_tunnel(r2s(&id_clone));
+                    }
                 });
-            }
-            drop(st);
-            if let Some(app) = app_weak.upgrade() {
-                app.invoke_update_search();
-            }
-        },
-    );
+            });
+        }
+        drop(st);
+        if let Some(app) = app_weak.upgrade() {
+            app.invoke_update_search();
+        }
+    });
 
     let state_clone = state.clone();
     let app_weak = app.as_weak();
@@ -362,9 +345,7 @@ fn main() {
         }
     });
 
-    // Auto Connect — collect IDs first so the lock is dropped before invoking,
-    // because invoke_start_tunnel synchronously calls on_start_tunnel which also
-    // needs to acquire state.lock() → deadlock if we hold it here.
+    // Auto Connect
     let auto_connect_ids: Vec<String> = {
         let st = state.lock().unwrap();
         st.configs
@@ -372,13 +353,13 @@ fn main() {
             .filter(|c| c.auto_connect)
             .map(|c| c.id.clone())
             .collect()
-    }; // lock dropped here
+    };
     for id in auto_connect_ids {
         app.invoke_start_tunnel(r2s(&id));
     }
 
-    // System Tray: optional — app continues even if tray is unavailable
-    let _tray = AppTray::new().ok().map(|tray| {
+    // System Tray
+    let _tray = AppTray::new().ok().inspect(|tray| {
         let app_weak_tray = app.as_weak();
         tray.on_show_window(move || {
             if let Some(app) = app_weak_tray.upgrade() {
@@ -388,7 +369,6 @@ fn main() {
         tray.on_quit(|| {
             slint::quit_event_loop().unwrap();
         });
-        tray
     });
 
     let app_weak2 = app.as_weak();
@@ -398,8 +378,6 @@ fn main() {
         }
     });
 
-    // Show the main window — required when SystemTrayIcon is present.
     app.window().show().unwrap();
-
     app.run().unwrap();
 }
