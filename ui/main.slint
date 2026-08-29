@@ -8,6 +8,7 @@ export struct TunnelData {
     proxy_port: string,
     proxy_username: string,
     save_proxy_password: bool,
+    rsa_key_path: string,
 
     target_host: string,
     target_port: string,
@@ -156,10 +157,10 @@ component SignalBars inherits HorizontalLayout {
     spacing: 3px;
     alignment: end;
 
-    Rectangle { width: 4px; height: 8px;  border-radius: 1.5px; background: level >= 1 ? Palette.active-green : Palette.inactive; }
-    Rectangle { width: 4px; height: 11px; border-radius: 1.5px; background: level >= 2 ? Palette.active-green : Palette.inactive; }
-    Rectangle { width: 4px; height: 14px; border-radius: 1.5px; background: level >= 3 ? Palette.active-green : Palette.inactive; }
-    Rectangle { width: 4px; height: 17px; border-radius: 1.5px; background: level >= 4 ? Palette.active-green : Palette.inactive; }
+    VerticalLayout { alignment: end; Rectangle { width: 4px; height: 8px;  border-radius: 1.5px; background: level >= 1 ? Palette.active-green : Palette.inactive; } }
+    VerticalLayout { alignment: end; Rectangle { width: 4px; height: 11px; border-radius: 1.5px; background: level >= 2 ? Palette.active-green : Palette.inactive; } }
+    VerticalLayout { alignment: end; Rectangle { width: 4px; height: 14px; border-radius: 1.5px; background: level >= 3 ? Palette.active-green : Palette.inactive; } }
+    VerticalLayout { alignment: end; Rectangle { width: 4px; height: 17px; border-radius: 1.5px; background: level >= 4 ? Palette.active-green : Palette.inactive; } }
 }
 
 // â”€â”€ Icon button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -171,7 +172,7 @@ component IconBtn inherits Rectangle {
 
     width: 36px; height: 36px;
     border-radius: 8px;
-    background: highlighted ? Palette.accent.with-alpha(0.15) : Palette.sidebar;
+    background: touch.pressed ? Palette.border-light : (highlighted ? Palette.accent.with-alpha(0.15) : Palette.sidebar);
     border-width: 1.5px;
     border-color: highlighted ? Palette.accent : Palette.border;
     animate border-color, background { duration: 180ms; }
@@ -207,7 +208,7 @@ component IconBtn inherits Rectangle {
         y: (parent.height - self.height) / 2;
     }
 
-    TouchArea { clicked => { root.clicked(); } }
+    touch := TouchArea { clicked => { root.clicked(); } }
 }
 
 // â”€â”€ Sidebar nav item â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -251,6 +252,7 @@ component AutoConnectBox inherits HorizontalLayout {
 // â”€â”€ Main window â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export component AppWindow inherits Window {
     title: "rTunnel";
+    icon: @image-url("../icon.png");
     preferred-width: 920px;
     preferred-height: 620px;
     background: Palette.bg-dark;
@@ -264,6 +266,11 @@ export component AppWindow inherits Window {
     in-out property <string>       search_text: "";
     in-out property <string>       active_tab: "tunnels";
     in-out property <AppSettings>  settings;
+    
+    in-out property <bool> engine_active: true;
+    in-out property <int> active_tunnels_count: 0;
+    in-out property <int> stopped_tunnels_count: 0;
+    callback minimize_to_tray_clicked();
 
     callback start_tunnel(string);
     callback stop_tunnel(string);
@@ -287,6 +294,14 @@ export component AppWindow inherits Window {
     callback submit_passwords(string, string);
 
     in-out property <bool>   show_info_prompt: false;
+
+    in-out property <bool>   show_host_key_prompt: false;
+    in-out property <string> prompt_host_key_fingerprint;
+    in-out property <string> prompt_host_key_line;
+    in-out property <string> prompt_host_key_tunnel_id;
+
+    callback accept_host_key(string, string);
+    callback reject_host_key();
 
     HorizontalLayout {
 
@@ -510,7 +525,44 @@ export component AppWindow inherits Window {
 
                                     IconBtn { kind: "copy"; clicked => { copy_tunnel(t.id); } }
                                     IconBtn { kind: "delete"; clicked => { delete_tunnel(t.id); } }
-                                    IconBtn { kind: "more"; }
+                                    IconBtn { 
+                                        kind: "more";
+                                        clicked => {
+                                            more_popup.show();
+                                        }
+                                        more_popup := PopupWindow {
+                                            width: 140px;
+                                            x: -100px;
+                                            y: 40px;
+                                            Rectangle {
+                                                width: 100%; height: 100%;
+                                                background: Palette.card;
+                                                border-radius: 6px;
+                                                border-width: 1px;
+                                                border-color: Palette.border;
+                                                drop-shadow-color: #00000040;
+                                                drop-shadow-blur: 10px;
+                                                
+                                                VerticalLayout {
+                                                    padding: 4px;
+                                                    
+                                                    Rectangle {
+                                                        height: 28px;
+                                                        border-radius: 4px;
+                                                        background: rsa_touch.has-hover ? Palette.sidebar : transparent;
+                                                        Text { text: "Configure RSA Key"; color: Palette.text-main; font-size: 12px; vertical-alignment: center; x: 10px; }
+                                                        rsa_touch := TouchArea {
+                                                            clicked => {
+                                                                if (selected_id != t.id) {
+                                                                    select_tunnel(t.id);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -592,6 +644,9 @@ export component AppWindow inherits Window {
                                 HorizontalLayout { spacing: 10px; Text { text: "Username:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.proxy_username; } }
                                 HorizontalLayout { spacing: 10px; CheckBox { text: "Save Password"; checked <=> edit_data.save_proxy_password; } }
 
+                                Text { text: "Advanced (SSH)"; font-weight: 700; color: Palette.text-main; font-size: 13px; }
+                                HorizontalLayout { spacing: 10px; Text { text: "RSA Key Path:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.rsa_key_path; placeholder-text: "Optional (/path/to/id_rsa)"; } }
+
 
                                 Text { text: "Target Destination"; font-weight: 700; color: Palette.text-main; font-size: 13px; }
                                 HorizontalLayout { spacing: 10px; Text { text: "Host:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.target_host; } }
@@ -602,9 +657,9 @@ export component AppWindow inherits Window {
                                     Rectangle {
                                         width: 160px; height: 36px;
                                         border-radius: 8px;
-                                        background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
+                                        background: save_config_touch.pressed ? Palette.accent-dark : @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
                                         Text { text: "Save Configuration"; font-size: 13px; font-weight: 700; color: white; horizontal-alignment: center; vertical-alignment: center; }
-                                        TouchArea { clicked => { save_config(edit_data); selected_id = ""; } }
+                                        save_config_touch := TouchArea { clicked => { save_config(edit_data); selected_id = ""; } }
                                     }
                                 }
                             }
@@ -661,9 +716,9 @@ export component AppWindow inherits Window {
                                 Rectangle {
                                     width: 140px; height: 36px;
                                     border-radius: 8px;
-                                    background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
+                                    background: save_settings_touch.pressed ? Palette.accent-dark : @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
                                     Text { text: "Save Settings"; font-size: 13px; font-weight: 700; color: white; horizontal-alignment: center; vertical-alignment: center; }
-                                    TouchArea { clicked => { save_settings(settings); } }
+                                    save_settings_touch := TouchArea { clicked => { save_settings(settings); } }
                                 }
                             }
                         }
@@ -682,18 +737,25 @@ export component AppWindow inherits Window {
                     padding-right: 16px;
                     spacing: 12px;
 
-                    Text { text: "rTunnel v1.2"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
+                    Text { text: "rTunnel v0.1.3"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
                     Text { text: "|"; color: Palette.border-light; font-size: 11px; vertical-alignment: center; }
-                    Text { text: "Connection Engine Active"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
+                    Text { text: root.engine_active ? "Connection Engine Active" : "Connection Engine Inactive"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
                     Text { text: "|"; color: Palette.border-light; font-size: 11px; vertical-alignment: center; }
-                    Text { text: "Tunnels: 3 Active, 1 Stopped"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
+                    Text { text: "Tunnels: " + root.active_tunnels_count + " Active, " + root.stopped_tunnels_count + " Stopped"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
                     // Compact mode / resize icon (two overlapping squares)
-                    Path {
-                        fill: Palette.text-sub;
+                    Rectangle {
                         width: 14px; height: 14px;
                         y: (parent.height - self.height) / 2;
-                        commands: "M 0 4 L 10 4 L 10 14 L 0 14 Z M 4 0 L 14 0 L 14 10 L 4 10 Z";
+                        background: transparent;
+                        Path {
+                            fill: tray_touch.has-hover ? Palette.text-main : Palette.text-sub;
+                            width: 100%; height: 100%;
+                            commands: "M 0 4 L 10 4 L 10 14 L 0 14 Z M 4 0 L 14 0 L 14 10 L 4 10 Z";
+                        }
+                        tray_touch := TouchArea {
+                            clicked => { root.minimize_to_tray_clicked(); }
+                        }
                     }
                 }
             }
@@ -706,13 +768,13 @@ export component AppWindow inherits Window {
         y: parent.height - 96px;
         width: 54px; height: 54px;
         border-radius: 27px;
-        background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
+        background: fab_touch.pressed ? Palette.accent-dark : @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
 
         // Plus icon
         Rectangle { x: 26px; y: 13px; width: 2px; height: 28px; background: white; border-radius: 1px; }
         Rectangle { x: 13px; y: 26px; width: 28px; height: 2px; background: white; border-radius: 1px; }
 
-        TouchArea { clicked => { create_new(); } }
+        fab_touch := TouchArea { clicked => { create_new(); } }
     }
 
     // â”€â”€ Password prompt overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -820,7 +882,7 @@ export component AppWindow inherits Window {
                 Text { text: "About rTunnel"; font-weight: 700; color: Palette.text-main; font-size: 15px; }
                 ScrollView {
                     width: 100%;
-                    Text { text: "rTunnel is a robust SSH Tunnel Manager designed to securely route your traffic.\n\nVersion: v1.2\nLicense: MIT and Apache 2.0"; wrap: word-wrap; color: Palette.text-sub; width: 374px; font-size: 13px; }
+                    Text { text: "rTunnel is a robust SSH Tunnel Manager designed to securely route your traffic.\n\nVersion: v0.1.3\nLicense: MIT and Apache 2.0"; wrap: word-wrap; color: Palette.text-sub; width: 374px; font-size: 13px; }
                 }
                 HorizontalLayout {
                     alignment: end;
@@ -835,6 +897,49 @@ export component AppWindow inherits Window {
             }
         }
     }
+
+    // ── Host key prompt overlay ──────────────────────────────────────────────────
+    if (show_host_key_prompt) : Rectangle {
+        background: #00000099;
+        TouchArea { }
+
+        Rectangle {
+            width: 460px; height: 260px;
+            border-radius: 12px;
+            background: Palette.card;
+            border-width: 1px; border-color: Palette.border-light;
+            drop-shadow-color: #00000060;
+            drop-shadow-blur: 32px; drop-shadow-offset-y: 10px;
+
+            VerticalLayout {
+                padding: 24px; spacing: 14px;
+
+                Text { text: "Unknown Host Key"; font-weight: 700; color: Palette.text-main; font-size: 15px; }
+                Text { text: "The server's host key is unknown or has changed. Do you want to trust it?"; wrap: word-wrap; color: Palette.text-sub; font-size: 13px; }
+                Text { text: "Fingerprint (SHA256):"; font-weight: 700; color: Palette.text-main; font-size: 12px; }
+                Text { text: prompt_host_key_fingerprint; color: Palette.accent; font-size: 12px; }
+
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout {
+                    spacing: 10px; alignment: end;
+                    Rectangle {
+                        width: 90px; height: 34px;
+                        border-radius: 8px; background: Palette.sidebar;
+                        border-width: 1px; border-color: Palette.border;
+                        Text { text: "Reject"; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; color: Palette.text-sub; }
+                        TouchArea { clicked => { reject_host_key(); } }
+                    }
+                    Rectangle {
+                        width: 90px; height: 34px;
+                        border-radius: 8px;
+                        background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
+                        Text { text: "Accept"; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; color: white; }
+                        TouchArea { clicked => { accept_host_key(prompt_host_key_tunnel_id, prompt_host_key_line); } }
+                    }
+                }
+            }
+        }
+    }
 }
 
 export component AppTray inherits SystemTrayIcon {
@@ -843,6 +948,9 @@ export component AppTray inherits SystemTrayIcon {
 
     callback show-window();
     callback quit();
+    
+    // In Slint, SystemTrayIcon currently only explicitly supports `clicked`, but clicking twice (double clicking) will trigger this and also work fine.
+    clicked => { root.show-window(); }
 
     Menu {
         MenuItem { title: "Show rTunnel"; activated => { show-window(); } }

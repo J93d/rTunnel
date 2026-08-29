@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -15,6 +14,7 @@ pub struct TunnelConfig {
     pub proxy_port: u16,
     pub proxy_username: String,
     pub save_proxy_password: bool,
+    pub rsa_key_path: String,
 
     // Target config (relative to Proxy server)
     pub target_host: String,
@@ -33,6 +33,7 @@ impl Default for TunnelConfig {
             proxy_port: 22,
             proxy_username: "".to_string(),
             save_proxy_password: true,
+            rsa_key_path: "".to_string(),
             target_host: "127.0.0.1".to_string(),
             target_port: 80,
             auto_connect: false,
@@ -40,18 +41,20 @@ impl Default for TunnelConfig {
     }
 }
 
+pub fn get_config_dir() -> PathBuf {
+    let dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rTunnel");
+    let _ = fs::create_dir_all(&dir);
+    dir
+}
+
 pub fn get_config_path() -> PathBuf {
-    let mut path = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    path.pop(); // Remove the executable name
-    path.push("config.json");
-    path
+    get_config_dir().join("config.json")
 }
 
 pub fn get_app_config_path() -> PathBuf {
-    let mut path = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    path.pop(); // Remove the executable name
-    path.push("settings.json");
-    path
+    get_config_dir().join("settings.json")
 }
 
 pub fn load_configs() -> Vec<TunnelConfig> {

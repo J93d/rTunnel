@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Build Release
+      run: cargo build --release
+      
+    # Uncomment the below lines to integrate with SignPath
+    # - name: Sign with SignPath
+    #   uses: signpath/github-action-submit-signing-request@v1
+    #   with:
+    #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+    #     organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+    #     project-slug: rtunnel
+    #     signing-policy-slug: release-policy
+    #     artifact-configuration-slug: windows-exe
+    #     wait-for-completion: true
+    #     output-artifact-directory: signed-artifacts
+    #
+    # - name: Upload signed artifacts
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: signed-exe
+    #     path: signed-artifacts/
+
+    - name: Upload Release Asset
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: target/release/rTunnel.exe
