@@ -611,20 +611,14 @@ export component AppWindow inherits Window {
                                     y: 2px;
                                 }
                                 Text {
-                                    text: t.is_running ? "Data RX/TX: " + t.tx_rx : "Never Connected";
+                                    text: "Data RX/TX: " + t.tx_rx;
                                     color: Palette.text-sub;
                                     font-size: 12px;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
                                 }
 
-                                if t.is_running : SignalBars { level: t.signal; }
-                                if !t.is_running : Text {
-                                    text: "Never Connected";
-                                    color: Palette.text-sub;
-                                    font-size: 12px;
-                                    vertical-alignment: center;
-                                }
+                                SignalBars { level: t.signal; }
                             }
 
                             // ── Expanded edit form ────────────────────────

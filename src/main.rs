@@ -7,7 +7,7 @@ mod tunnel;
 use config::{
     AppConfig, TunnelConfig, load_app_config, load_configs, save_app_config, save_configs,
 };
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{Model, ModelRc, SharedString, VecModel};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -56,7 +56,7 @@ fn config_to_data(c: &TunnelConfig, running_info: Option<&tunnel::TunnelTelemetr
         let signal = if tx > 0.0 || rx > 0.0 { 4 } else { 3 };
         (r2s(&uptime), r2s(&tx_rx), signal)
     } else {
-        (r2s("Never Connected"), r2s("Never Connected"), 0)
+        (r2s("Not Connected"), r2s("0 B / 0 B"), 0)
     };
 
     TunnelData {
@@ -512,7 +512,19 @@ fn main() {
                 app.set_stopped_tunnels_count(total - active);
 
                 if need_update {
-                    tunnels_model_timer.set_vec(new_data);
+                    let mut i = 0;
+                    for c in &st.configs {
+                        if query.is_empty() || c.name.to_lowercase().contains(&query) {
+                            let info = st
+                                .running_tunnels
+                                .get(&c.id)
+                                .map(|(_, tel, _)| tel.as_ref());
+                            if info.is_some() {
+                                tunnels_model_timer.set_row_data(i, config_to_data(c, info));
+                            }
+                            i += 1;
+                        }
+                    }
                 }
             }
         },
