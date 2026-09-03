@@ -47,6 +47,7 @@ pub fn start_tunnel(
     let mut proxy_sess = Session::new().map_err(|e| e.to_string())?;
     proxy_sess.set_timeout(connection_timeout as u32 * 1000);
     proxy_sess.set_tcp_stream(proxy_tcp);
+    proxy_sess.set_keepalive(true, 10);
     proxy_sess
         .handshake()
         .map_err(|e| format!("Proxy handshake failed: {}", e))?;
@@ -131,8 +132,17 @@ pub fn start_tunnel(
     let mut tb = [0; 8192];
     let mut sb = [0; 8192];
 
+    let mut last_keepalive = Instant::now();
+
     while is_running.load(Ordering::Relaxed) {
         let mut progress = false;
+
+        if last_keepalive.elapsed() > Duration::from_secs(5) {
+            if proxy_sess.keepalive_send().is_err() {
+                break;
+            }
+            last_keepalive = Instant::now();
+        }
 
         // Accept new connections
         match listener.accept() {

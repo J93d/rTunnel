@@ -14,6 +14,7 @@ export struct TunnelData {
     target_port: string,
     auto_connect: bool,
     is_running: bool,
+    is_reconnecting: bool,
     uptime: string,
     tx_rx: string,
     signal: int,
@@ -34,6 +35,7 @@ export global Palette {
     out property <color> accent:       #3EADFF;
     out property <color> accent-dark:  #1E7ADE;
     out property <color> active-green: #34D47F;
+    out property <color> reconnect-yellow: #FADB5F;
     out property <color> inactive:     #4A4D60;
     out property <color> border:       #2E3044;
     out property <color> border-light: #3A3D55;
@@ -272,7 +274,7 @@ export component AppWindow inherits Window {
     in-out property <int> stopped_tunnels_count: 0;
     callback minimize_to_tray_clicked();
 
-    callback start_tunnel(string);
+    callback start_tunnel(string, bool);
     callback stop_tunnel(string);
     callback save_config(TunnelData);
     callback save_settings(AppSettings);
@@ -291,7 +293,7 @@ export component AppWindow inherits Window {
     in-out property <bool>   show_error_prompt: false;
     in-out property <string> error_message;
     callback show_error(string);
-    callback submit_passwords(string, string);
+    callback submit_passwords(string, string, bool);
 
     in-out property <bool>   show_info_prompt: false;
 
@@ -299,8 +301,9 @@ export component AppWindow inherits Window {
     in-out property <string> prompt_host_key_fingerprint;
     in-out property <string> prompt_host_key_line;
     in-out property <string> prompt_host_key_tunnel_id;
+    in-out property <bool>   prompt_host_key_is_reconnect;
 
-    callback accept_host_key(string, string);
+    callback accept_host_key(string, string, bool);
     callback reject_host_key();
 
     HorizontalLayout {
@@ -449,8 +452,8 @@ export component AppWindow inherits Window {
                         border-radius: 12px;
                         background: Palette.card;
                         border-width: 1px;
-                        border-color: t.is_running ? Palette.accent.with-alpha(0.3) : Palette.border;
-                        drop-shadow-color: t.is_running ? Palette.accent.with-alpha(0.10) : #00000030;
+                        border-color: (t.is_running || t.is_reconnecting) ? Palette.accent.with-alpha(0.3) : Palette.border;
+                        drop-shadow-color: (t.is_running || t.is_reconnecting) ? Palette.accent.with-alpha(0.10) : #00000030;
                         drop-shadow-blur: 14px;
                         drop-shadow-offset-y: 4px;
 
@@ -468,16 +471,16 @@ export component AppWindow inherits Window {
                                     Rectangle {
                                         width: 11px; height: 11px;
                                         border-radius: 6px;
-                                        background: t.is_running ? Palette.active-green : Palette.inactive;
-                                        drop-shadow-color: t.is_running ? Palette.active-green.with-alpha(0.65) : transparent;
-                                        drop-shadow-blur: t.is_running ? 8px : 0px;
+                                        background: t.is_running ? Palette.active-green : (t.is_reconnecting ? Palette.reconnect-yellow : Palette.inactive);
+                                        drop-shadow-color: t.is_running ? Palette.active-green.with-alpha(0.65) : (t.is_reconnecting ? Palette.reconnect-yellow.with-alpha(0.65) : transparent);
+                                        drop-shadow-blur: (t.is_running || t.is_reconnecting) ? 8px : 0px;
                                     }
                                 }
 
                                 // Status label
                                 Text {
-                                    text: t.is_running ? "ACTIVE" : "DISCONNECTED";
-                                    color: t.is_running ? Palette.active-green : Palette.inactive;
+                                    text: t.is_running ? "ACTIVE" : (t.is_reconnecting ? "RECONNECTING" : "DISCONNECTED");
+                                    color: t.is_running ? Palette.active-green : (t.is_reconnecting ? Palette.reconnect-yellow : Palette.inactive);
                                     font-size: 10.5px;
                                     font-weight: 800;
                                     vertical-alignment: center;
@@ -507,11 +510,11 @@ export component AppWindow inherits Window {
                                     spacing: 7px;
 
                                     IconBtn {
-                                        kind: t.is_running ? "stop" : "play";
-                                        highlighted: t.is_running;
+                                        kind: (t.is_running || t.is_reconnecting) ? "stop" : "play";
+                                        highlighted: (t.is_running || t.is_reconnecting);
                                         clicked => {
-                                            if (t.is_running) { stop_tunnel(t.id); }
-                                            else { start_tunnel(t.id); }
+                                            if (t.is_running || t.is_reconnecting) { stop_tunnel(t.id); }
+                                            else { start_tunnel(t.id, false); }
                                         }
                                     }
 
@@ -581,7 +584,7 @@ export component AppWindow inherits Window {
 
                                 NetworkIcon {
                                     width: 16px; height: 16px;
-                                    icon-color: t.is_running ? Palette.accent : Palette.inactive;
+                                    icon-color: t.is_running ? Palette.accent : (t.is_reconnecting ? Palette.reconnect-yellow : Palette.inactive);
                                 }
 
                                 Text {
@@ -812,7 +815,7 @@ export component AppWindow inherits Window {
                         TouchArea {
                             clicked => {
                                 show_password_prompt = false;
-                                submit_passwords(prompt_tunnel_id, prompt_proxy_pass);
+                                submit_passwords(prompt_tunnel_id, prompt_proxy_pass, false);
                                 prompt_proxy_pass = "";
                             }
                         }
@@ -928,7 +931,7 @@ export component AppWindow inherits Window {
                         border-radius: 8px;
                         background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
                         Text { text: "Accept"; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; color: white; }
-                        TouchArea { clicked => { accept_host_key(prompt_host_key_tunnel_id, prompt_host_key_line); } }
+                        TouchArea { clicked => { accept_host_key(prompt_host_key_tunnel_id, prompt_host_key_line, prompt_host_key_is_reconnect); } }
                     }
                 }
             }
