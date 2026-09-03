@@ -1,4 +1,4 @@
-# rTunnel v0.1.5
+# rTunnel v0.2.0
 
 **rTunnel** is an SSH tunneling desktop application designed to link a local Windows port to a Remote Server by tunneling through an intermediary Proxy SSH server.
 

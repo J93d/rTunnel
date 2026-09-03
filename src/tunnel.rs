@@ -1,11 +1,16 @@
 use crate::config::TunnelConfig;
-use ssh2::Session;
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use async_trait::async_trait;
+use russh::*;
+use russh_keys::PublicKeyBase64;
+use russh_keys::key;
+use sha2::{Digest, Sha256};
+use std::io::BufRead;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
+use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
 #[derive(Debug)]
@@ -20,234 +25,231 @@ impl From<String> for TunnelError {
     }
 }
 
+impl From<russh::Error> for TunnelError {
+    fn from(e: russh::Error) -> Self {
+        TunnelError::Message(e.to_string())
+    }
+}
+
+impl From<russh_keys::Error> for TunnelError {
+    fn from(e: russh_keys::Error) -> Self {
+        TunnelError::Message(e.to_string())
+    }
+}
+
+impl From<std::io::Error> for TunnelError {
+    fn from(e: std::io::Error) -> Self {
+        TunnelError::Message(e.to_string())
+    }
+}
+
 pub struct TunnelTelemetry {
     pub start_time: Instant,
     pub tx_bytes: AtomicU64,
     pub rx_bytes: AtomicU64,
 }
 
-pub fn start_tunnel(
+struct ClientHandler {
+    host: String,
+    port: u16,
+    known_hosts_path: std::path::PathBuf,
+    key_error: Arc<Mutex<Option<TunnelError>>>,
+}
+
+#[async_trait]
+impl client::Handler for ClientHandler {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &key::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        let mut found = false;
+
+        let pub_key_bytes = server_public_key.public_key_bytes();
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let b64_key = STANDARD.encode(&pub_key_bytes);
+
+        if let Ok(file) = std::fs::File::open(&self.known_hosts_path) {
+            let reader = std::io::BufReader::new(file);
+            for line in reader.lines().map_while(Result::ok) {
+                if line.contains(&b64_key) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        if found {
+            return Ok(true);
+        }
+
+        // Compute fingerprint
+        let mut hasher = Sha256::new();
+        hasher.update(pub_key_bytes);
+        let hash = hasher.finalize();
+        let fingerprint = hash
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>();
+
+        let key_type_str = server_public_key.name(); // e.g., ssh-ed25519
+
+        let port_str = if self.port == 22 {
+            self.host.clone()
+        } else {
+            format!("[{}]:{}", self.host, self.port)
+        };
+        let base64_line = format!("{} {} {}", port_str, key_type_str, b64_key);
+
+        let mut lock = self.key_error.lock().await;
+        *lock = Some(TunnelError::UnknownHostKey(fingerprint, base64_line));
+
+        Ok(false) // Reject to halt connection
+    }
+}
+
+pub async fn start_tunnel(
     config: TunnelConfig,
     proxy_pass: Zeroizing<String>,
     is_running: Arc<AtomicBool>,
     telemetry: Arc<TunnelTelemetry>,
     connection_timeout: u64,
 ) -> Result<(), TunnelError> {
-    // 1. Proxy Setup
-    let proxy_addr = (config.proxy_host.as_str(), config.proxy_port)
-        .to_socket_addrs()
-        .map_err(|e| format!("Proxy DNS resolution failed: {}", e))?
-        .next()
-        .ok_or_else(|| "Could not resolve proxy host".to_string())?;
-
-    let proxy_tcp =
-        TcpStream::connect_timeout(&proxy_addr, Duration::from_secs(connection_timeout))
-            .map_err(|e| format!("Proxy connect failed: {}", e))?;
-
-    let mut proxy_sess = Session::new().map_err(|e| e.to_string())?;
-    proxy_sess.set_timeout(connection_timeout as u32 * 1000);
-    proxy_sess.set_tcp_stream(proxy_tcp);
-    proxy_sess.set_keepalive(true, 10);
-    proxy_sess
-        .handshake()
-        .map_err(|e| format!("Proxy handshake failed: {}", e))?;
-
-    let mut known_hosts = proxy_sess
-        .known_hosts()
-        .map_err(|e| format!("Failed to init known_hosts: {}", e))?;
-
     let known_hosts_path = dirs::home_dir()
         .ok_or_else(|| "Cannot determine home directory".to_string())?
         .join(".ssh")
         .join("known_hosts");
 
-    if known_hosts_path.exists() {
-        known_hosts
-            .read_file(&known_hosts_path, ssh2::KnownHostFileKind::OpenSSH)
-            .map_err(|e| format!("Failed to read known_hosts: {}", e))?;
+    let key_error = Arc::new(Mutex::new(None));
+
+    let handler = ClientHandler {
+        host: config.proxy_host.clone(),
+        port: config.proxy_port,
+        known_hosts_path,
+        key_error: key_error.clone(),
+    };
+
+    let russh_config = russh::client::Config::default();
+    let russh_config = Arc::new(russh_config);
+
+    let connect_future = russh::client::connect(
+        russh_config,
+        (config.proxy_host.as_str(), config.proxy_port),
+        handler,
+    );
+    let mut session = tokio::time::timeout(Duration::from_secs(connection_timeout), connect_future)
+        .await
+        .map_err(|_| TunnelError::Message("Connection timeout".to_string()))??;
+
+    // Check if key error was set during connect
+    if let Some(err) = key_error.lock().await.take() {
+        return Err(err);
     }
 
-    let (host_key, key_type) = proxy_sess
-        .host_key()
-        .ok_or_else(|| "Server did not provide a host key".to_string())?;
-
-    match known_hosts.check_port(&config.proxy_host, config.proxy_port, host_key) {
-        ssh2::CheckResult::Match => { /* Host key verified */ }
-        ssh2::CheckResult::NotFound | ssh2::CheckResult::Mismatch => {
-            let fingerprint = proxy_sess
-                .host_key_hash(ssh2::HashType::Sha256)
-                .map(|h| h.iter().map(|b| format!("{:02x}", b)).collect::<String>())
-                .unwrap_or_else(|| "unknown".to_string());
-
-            let key_type_str = match key_type {
-                ssh2::HostKeyType::Rsa => "ssh-rsa",
-                ssh2::HostKeyType::Ed25519 => "ssh-ed25519",
-                ssh2::HostKeyType::Ecdsa256 => "ecdsa-sha2-nistp256",
-                ssh2::HostKeyType::Ecdsa384 => "ecdsa-sha2-nistp384",
-                ssh2::HostKeyType::Ecdsa521 => "ecdsa-sha2-nistp521",
-                ssh2::HostKeyType::Dss => "ssh-dss",
-                _ => return Err(TunnelError::Message("Unsupported host key type".into())),
-            };
-
-            use base64::{Engine as _, engine::general_purpose::STANDARD};
-            let b64_key = STANDARD.encode(host_key);
-
-            let port_str = if config.proxy_port == 22 {
-                config.proxy_host.clone()
-            } else {
-                format!("[{}]:{}", config.proxy_host, config.proxy_port)
-            };
-            let base64_line = format!("{} {} {}", port_str, key_type_str, b64_key);
-
-            return Err(TunnelError::UnknownHostKey(fingerprint, base64_line));
-        }
-        ssh2::CheckResult::Failure => {
-            return Err(TunnelError::Message(
-                "Host key verification failed".to_string(),
-            ));
-        }
-    }
-
-    if !config.rsa_key_path.is_empty() {
+    // Auth
+    let auth_res = if !config.rsa_key_path.is_empty() {
         let key_path = std::path::Path::new(&config.rsa_key_path);
-        let pub_key_str = format!("{}.pub", config.rsa_key_path);
-        let pub_key_path = std::path::Path::new(&pub_key_str);
-        let pub_key = if pub_key_path.exists() {
-            Some(pub_key_path)
-        } else {
-            None
-        };
         let passphrase = if proxy_pass.is_empty() {
             None
         } else {
             Some(proxy_pass.as_str())
         };
-
-        proxy_sess
-            .userauth_pubkey_file(&config.proxy_username, pub_key, key_path, passphrase)
-            .map_err(|e| format!("Key auth failed: {}", e))?;
+        let key = russh_keys::load_secret_key(key_path, passphrase)?;
+        session
+            .authenticate_publickey(config.proxy_username.clone(), Arc::new(key))
+            .await?
     } else {
-        proxy_sess
-            .userauth_password(&config.proxy_username, &proxy_pass)
-            .map_err(|e| format!("Proxy auth failed: {}", e))?;
+        session
+            .authenticate_password(config.proxy_username.clone(), proxy_pass.as_str())
+            .await?
+    };
+
+    if !auth_res {
+        return Err(TunnelError::Message("Authentication failed".to_string()));
     }
 
-    // 2. Local Tunnel Port Setup
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", config.local_port))
-        .map_err(|e| format!("Failed to bind local port: {}", e))?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|e| format!("Failed to set listener non-blocking: {}", e))?;
-    proxy_sess.set_blocking(false);
-
-    // 3. Multiplexing Loop
-    let mut clients: Vec<(TcpStream, ssh2::Channel)> = Vec::new();
-    let mut tb = [0; 8192];
-    let mut sb = [0; 8192];
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", config.local_port)).await?;
+    let session = Arc::new(tokio::sync::Mutex::new(session));
 
     let mut last_keepalive = Instant::now();
 
-    while is_running.load(Ordering::Relaxed) {
-        let mut progress = false;
-
-        if last_keepalive.elapsed() > Duration::from_secs(5) {
-            if proxy_sess.keepalive_send().is_err() {
-                break;
-            }
-            last_keepalive = Instant::now();
-        }
-
-        // Accept new connections
-        match listener.accept() {
-            Ok((user_tcp, _)) => {
-                let _ = user_tcp.set_nonblocking(true);
-                proxy_sess.set_blocking(true); // temporary blocking to open channel
-                match proxy_sess.channel_direct_tcpip(&config.target_host, config.target_port, None)
-                {
-                    Ok(channel) => {
-                        clients.push((user_tcp, channel));
-                        progress = true;
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to open target channel: {}", e);
-                    }
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                if !is_running.load(Ordering::Relaxed) {
+                    break;
                 }
-                proxy_sess.set_blocking(false);
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-            Err(_) => break,
-        }
-
-        // Process existing clients
-        let mut i = 0;
-        while i < clients.len() {
-            let mut keep = true;
-            let (tcp, channel) = &mut clients[i];
-
-            // TCP to SSH
-            match tcp.read(&mut tb) {
-                Ok(0) => keep = false,
-                Ok(n) => {
-                    proxy_sess.set_blocking(true);
-                    if channel.write_all(&tb[..n]).is_err() {
-                        keep = false;
-                    } else {
-                        telemetry.tx_bytes.fetch_add(n as u64, Ordering::Relaxed);
-                    }
-                    proxy_sess.set_blocking(false);
-                    progress = true;
+                if last_keepalive.elapsed() > Duration::from_secs(5) {
+                    last_keepalive = Instant::now();
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(_) => keep = false,
-            }
+            },
+            accept_res = listener.accept() => {
+                if let Ok((user_tcp, _)) = accept_res {
+                    let session_handle = session.clone();
+                    let target_host = config.target_host.clone();
+                    let target_port = config.target_port;
+                    let telemetry_clone = telemetry.clone();
 
-            // SSH to TCP
-            if keep {
-                match channel.read(&mut sb) {
-                    Ok(0) => {
-                        if channel.eof() {
-                            keep = false;
+                    tokio::spawn(async move {
+                        let channel_res = {
+                            let sess = session_handle.lock().await;
+                            sess.channel_open_direct_tcpip(target_host, target_port as u32, "localhost", 0).await
+                        };
+                        if let Ok(channel) = channel_res {
+                            let stream = channel.into_stream();
+
+                            let (mut user_rx, mut user_tx) = tokio::io::split(user_tcp);
+                            let (mut ch_rx, mut ch_tx) = tokio::io::split(stream);
+
+                            let tel_tx = telemetry_clone.clone();
+                            let t1 = tokio::spawn(async move {
+                                let mut buf = [0u8; 8192];
+                                loop {
+                                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                                    match user_rx.read(&mut buf).await {
+                                        Ok(0) => break,
+                                        Ok(n) => {
+                                            let _: Result<(), _> = ch_tx.write_all(&buf[..n]).await;
+                                            tel_tx.tx_bytes.fetch_add(n as u64, Ordering::Relaxed);
+                                        }
+                                        Err(_) => break,
+                                    }
+                                }
+                            });
+
+                            let tel_rx = telemetry_clone.clone();
+                            let t2 = tokio::spawn(async move {
+                                let mut buf = [0u8; 8192];
+                                loop {
+                                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                                    match ch_rx.read(&mut buf).await {
+                                        Ok(0) => break,
+                                        Ok(n) => {
+                                            let _: Result<(), _> = user_tx.write_all(&buf[..n]).await;
+                                            tel_rx.rx_bytes.fetch_add(n as u64, Ordering::Relaxed);
+                                        }
+                                        Err(_) => break,
+                                    }
+                                }
+                            });
+
+                            let _ = tokio::join!(t1, t2);
                         }
-                    }
-                    Ok(n) => {
-                        let _ = tcp.set_nonblocking(false);
-                        if tcp.write_all(&sb[..n]).is_err() {
-                            keep = false;
-                        } else {
-                            telemetry.rx_bytes.fetch_add(n as u64, Ordering::Relaxed);
-                        }
-                        let _ = tcp.set_nonblocking(true);
-                        progress = true;
-                    }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                    Err(_) => keep = false,
+                    });
                 }
             }
-
-            if keep {
-                i += 1;
-            } else {
-                let mut c = clients.remove(i).1;
-                let _ = c.send_eof();
-                let _ = c.wait_eof();
-                let _ = c.close();
-                let _ = c.wait_close();
-            }
-        }
-
-        if !progress {
-            thread::sleep(Duration::from_millis(10));
         }
     }
 
-    for (_, mut channel) in clients {
-        let _ = channel.send_eof();
-        let _ = channel.wait_eof();
-        let _ = channel.close();
-        let _ = channel.wait_close();
-    }
-
-    let _ = proxy_sess.disconnect(None, "rTunnel session closed", None);
+    let sess = session.lock().await;
+    let _ = sess
+        .disconnect(
+            russh::Disconnect::ByApplication,
+            "rTunnel session closed",
+            "en-US",
+        )
+        .await;
 
     Ok(())
 }

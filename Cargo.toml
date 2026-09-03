@@ -1,6 +1,6 @@
 [package]
 name = "rTunnel"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -11,8 +11,11 @@ keyring = "4.1.6"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 slint = "1.17.1"
-# TODO(SECURITY): Monitor ssh2 crate for releases > 0.9.6 that include patched libssh2 (CVE-2026-55200, etc.)
-ssh2 = "0.9.6"
+russh = "0.44.1"
+russh-keys = "0.44.0"
+tokio = { version = "1.40", features = ["rt-multi-thread", "net", "io-util", "time", "macros"] }
+async-trait = "0.1.81"
+sha2 = "0.10.8"
 uuid = { version = "1.25.0", features = ["v4"] }
 zeroize = { version = "1", features = ["derive"] }
 

@@ -405,13 +405,17 @@ fn main() {
                 let app_w = app_weak.clone();
                 let state_w = state_clone.clone();
                 let handle = thread::spawn(move || {
-                    let result = tunnel::start_tunnel(
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap();
+                    let result = rt.block_on(tunnel::start_tunnel(
                         c,
                         p_pass_zero,
                         is_running_clone.clone(),
                         telemetry_clone,
                         timeout,
-                    );
+                    ));
 
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(app) = app_w.upgrade() {
