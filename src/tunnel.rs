@@ -110,8 +110,21 @@ pub fn start_tunnel(
 
     if !config.rsa_key_path.is_empty() {
         let key_path = std::path::Path::new(&config.rsa_key_path);
+        let pub_key_str = format!("{}.pub", config.rsa_key_path);
+        let pub_key_path = std::path::Path::new(&pub_key_str);
+        let pub_key = if pub_key_path.exists() {
+            Some(pub_key_path)
+        } else {
+            None
+        };
+        let passphrase = if proxy_pass.is_empty() {
+            None
+        } else {
+            Some(proxy_pass.as_str())
+        };
+
         proxy_sess
-            .userauth_pubkey_file(&config.proxy_username, None, key_path, Some(&proxy_pass))
+            .userauth_pubkey_file(&config.proxy_username, pub_key, key_path, passphrase)
             .map_err(|e| format!("Key auth failed: {}", e))?;
     } else {
         proxy_sess

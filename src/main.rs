@@ -368,111 +368,113 @@ fn main() {
 
     let state_clone = state.clone();
     let app_weak = app.as_weak();
-    app.on_submit_passwords(move |id: SharedString, p_pass: SharedString, is_reconnect: bool| {
-        let id = s2r(id);
-        let mut p_pass = s2r(p_pass);
+    app.on_submit_passwords(
+        move |id: SharedString, p_pass: SharedString, is_reconnect: bool| {
+            let id = s2r(id);
+            let mut p_pass = s2r(p_pass);
 
-        let mut st = state_clone.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(c) = st.configs.iter().find(|x| x.id == id).cloned() {
-            if p_pass.is_empty() {
-                p_pass = keyring_manager::get_password(
-                    &keyring_manager::get_proxy_service_name(&id),
-                    &c.proxy_username,
-                )
-                .unwrap_or_default();
-            } else if c.save_proxy_password {
-                let _ = keyring_manager::save_password(
-                    &keyring_manager::get_proxy_service_name(&id),
-                    &c.proxy_username,
-                    &p_pass,
-                );
-            }
+            let mut st = state_clone.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(c) = st.configs.iter().find(|x| x.id == id).cloned() {
+                if p_pass.is_empty() {
+                    p_pass = keyring_manager::get_password(
+                        &keyring_manager::get_proxy_service_name(&id),
+                        &c.proxy_username,
+                    )
+                    .unwrap_or_default();
+                } else if c.save_proxy_password {
+                    let _ = keyring_manager::save_password(
+                        &keyring_manager::get_proxy_service_name(&id),
+                        &c.proxy_username,
+                        &p_pass,
+                    );
+                }
 
-            let is_running = Arc::new(AtomicBool::new(true));
-            let telemetry = Arc::new(tunnel::TunnelTelemetry {
-                start_time: std::time::Instant::now(),
-                tx_bytes: std::sync::atomic::AtomicU64::new(0),
-                rx_bytes: std::sync::atomic::AtomicU64::new(0),
-            });
-            let timeout = load_app_config().connection_timeout;
+                let is_running = Arc::new(AtomicBool::new(true));
+                let telemetry = Arc::new(tunnel::TunnelTelemetry {
+                    start_time: std::time::Instant::now(),
+                    tx_bytes: std::sync::atomic::AtomicU64::new(0),
+                    rx_bytes: std::sync::atomic::AtomicU64::new(0),
+                });
+                let timeout = load_app_config().connection_timeout;
 
-            let is_running_clone = is_running.clone();
-            let telemetry_clone = telemetry.clone();
-            let p_pass_zero = Zeroizing::new(p_pass);
+                let is_running_clone = is_running.clone();
+                let telemetry_clone = telemetry.clone();
+                let p_pass_zero = Zeroizing::new(p_pass);
 
-            let id_clone = id.clone();
-            let app_w = app_weak.clone();
-            let state_w = state_clone.clone();
-            let handle = thread::spawn(move || {
-                let result = tunnel::start_tunnel(
-                    c,
-                    p_pass_zero,
-                    is_running_clone.clone(),
-                    telemetry_clone,
-                    timeout,
-                );
+                let id_clone = id.clone();
+                let app_w = app_weak.clone();
+                let state_w = state_clone.clone();
+                let handle = thread::spawn(move || {
+                    let result = tunnel::start_tunnel(
+                        c,
+                        p_pass_zero,
+                        is_running_clone.clone(),
+                        telemetry_clone,
+                        timeout,
+                    );
 
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(app) = app_w.upgrade() {
-                        let stopped_unexpectedly = is_running_clone.load(Ordering::Relaxed);
-                        let mut auto = false;
-                        {
-                            let st = state_w.lock().unwrap_or_else(|p| p.into_inner());
-                            if let Some(c) = st.configs.iter().find(|x| x.id == id_clone) {
-                                auto = c.auto_connect;
-                            }
-                        }
-
-                        match result {
-                            Err(tunnel::TunnelError::UnknownHostKey(fingerprint, b64_line)) => {
-                                app.set_prompt_host_key_fingerprint(r2s(&fingerprint));
-                                app.set_prompt_host_key_line(r2s(&b64_line));
-                                app.set_prompt_host_key_tunnel_id(r2s(&id_clone));
-                                app.set_prompt_host_key_is_reconnect(is_reconnect);
-                                app.set_show_host_key_prompt(true);
-                                auto = false; // Don't auto-reconnect if host key is unverified
-                            }
-                            Err(tunnel::TunnelError::Message(e)) => {
-                                if !is_reconnect {
-                                    app.set_error_message(r2s(&e));
-                                    app.set_show_error_prompt(true);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(app) = app_w.upgrade() {
+                            let stopped_unexpectedly = is_running_clone.load(Ordering::Relaxed);
+                            let mut auto = false;
+                            {
+                                let st = state_w.lock().unwrap_or_else(|p| p.into_inner());
+                                if let Some(c) = st.configs.iter().find(|x| x.id == id_clone) {
+                                    auto = c.auto_connect;
                                 }
                             }
-                            Ok(_) => {}
-                        }
-                        app.invoke_stop_tunnel(r2s(&id_clone));
 
-                        if stopped_unexpectedly && auto {
-                            {
-                                let mut st = state_w.lock().unwrap_or_else(|p| p.into_inner());
-                                st.reconnecting_tunnels.insert(id_clone.clone());
-                            }
-                            let app_reconnect = app.as_weak();
-                            let id_reconnect = id_clone.clone();
-                            thread::spawn(move || {
-                                thread::sleep(std::time::Duration::from_secs(5));
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(app) = app_reconnect.upgrade() {
-                                        app.invoke_start_tunnel(r2s(&id_reconnect), true);
+                            match result {
+                                Err(tunnel::TunnelError::UnknownHostKey(fingerprint, b64_line)) => {
+                                    app.set_prompt_host_key_fingerprint(r2s(&fingerprint));
+                                    app.set_prompt_host_key_line(r2s(&b64_line));
+                                    app.set_prompt_host_key_tunnel_id(r2s(&id_clone));
+                                    app.set_prompt_host_key_is_reconnect(is_reconnect);
+                                    app.set_show_host_key_prompt(true);
+                                    auto = false; // Don't auto-reconnect if host key is unverified
+                                }
+                                Err(tunnel::TunnelError::Message(e)) => {
+                                    if !is_reconnect {
+                                        app.set_error_message(r2s(&e));
+                                        app.set_show_error_prompt(true);
                                     }
-                                });
-                            });
-                        } else {
-                            let mut st = state_w.lock().unwrap_or_else(|p| p.into_inner());
-                            st.reconnecting_tunnels.remove(&id_clone);
-                        }
-                    }
-                });
-            });
+                                }
+                                Ok(_) => {}
+                            }
+                            app.invoke_stop_tunnel(r2s(&id_clone));
 
-            st.running_tunnels
-                .insert(id.clone(), (is_running, telemetry, Some(handle)));
-        }
-        drop(st);
-        if let Some(app) = app_weak.upgrade() {
-            app.invoke_update_search();
-        }
-    });
+                            if stopped_unexpectedly && auto {
+                                {
+                                    let mut st = state_w.lock().unwrap_or_else(|p| p.into_inner());
+                                    st.reconnecting_tunnels.insert(id_clone.clone());
+                                }
+                                let app_reconnect = app.as_weak();
+                                let id_reconnect = id_clone.clone();
+                                thread::spawn(move || {
+                                    thread::sleep(std::time::Duration::from_secs(5));
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(app) = app_reconnect.upgrade() {
+                                            app.invoke_start_tunnel(r2s(&id_reconnect), true);
+                                        }
+                                    });
+                                });
+                            } else {
+                                let mut st = state_w.lock().unwrap_or_else(|p| p.into_inner());
+                                st.reconnecting_tunnels.remove(&id_clone);
+                            }
+                        }
+                    });
+                });
+
+                st.running_tunnels
+                    .insert(id.clone(), (is_running, telemetry, Some(handle)));
+            }
+            drop(st);
+            if let Some(app) = app_weak.upgrade() {
+                app.invoke_update_search();
+            }
+        },
+    );
 
     let state_clone = state.clone();
     let app_weak = app.as_weak();
@@ -493,29 +495,31 @@ fn main() {
     });
 
     let app_weak_tofu = app.as_weak();
-    app.on_accept_host_key(move |id: SharedString, b64_line: SharedString, is_reconnect: bool| {
-        let b64 = s2r(b64_line);
-        let id_str = s2r(id);
+    app.on_accept_host_key(
+        move |id: SharedString, b64_line: SharedString, is_reconnect: bool| {
+            let b64 = s2r(b64_line);
+            let id_str = s2r(id);
 
-        if let Some(home) = dirs::home_dir() {
-            let ssh_dir = home.join(".ssh");
-            let _ = std::fs::create_dir_all(&ssh_dir);
-            let kh_path = ssh_dir.join("known_hosts");
-            use std::io::Write;
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(kh_path)
-            {
-                let _ = writeln!(file, "{}", b64);
+            if let Some(home) = dirs::home_dir() {
+                let ssh_dir = home.join(".ssh");
+                let _ = std::fs::create_dir_all(&ssh_dir);
+                let kh_path = ssh_dir.join("known_hosts");
+                use std::io::Write;
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(kh_path)
+                {
+                    let _ = writeln!(file, "{}", b64);
+                }
             }
-        }
 
-        if let Some(app) = app_weak_tofu.upgrade() {
-            app.set_show_host_key_prompt(false);
-            app.invoke_start_tunnel(r2s(&id_str), is_reconnect);
-        }
-    });
+            if let Some(app) = app_weak_tofu.upgrade() {
+                app.set_show_host_key_prompt(false);
+                app.invoke_start_tunnel(r2s(&id_str), is_reconnect);
+            }
+        },
+    );
 
     let app_weak_tofu_rej = app.as_weak();
     app.on_reject_host_key(move || {
@@ -569,7 +573,8 @@ fn main() {
                                 .map(|(_, tel, _)| tel.as_ref());
                             let is_recon = st.reconnecting_tunnels.contains(&c.id);
                             if info.is_some() || is_recon {
-                                tunnels_model_timer.set_row_data(i, config_to_data(c, info, is_recon));
+                                tunnels_model_timer
+                                    .set_row_data(i, config_to_data(c, info, is_recon));
                             }
                             i += 1;
                         }
