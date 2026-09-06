@@ -125,6 +125,7 @@ struct AppState {
     configs: Vec<TunnelConfig>,
     running_tunnels: HashMap<String, TunnelState>,
     reconnecting_tunnels: std::collections::HashSet<String>,
+    reconnect_delays: HashMap<String, u64>,
 }
 
 fn main() {
@@ -152,6 +153,7 @@ fn main() {
         configs: load_configs(),
         running_tunnels: HashMap::new(),
         reconnecting_tunnels: std::collections::HashSet::new(),
+        reconnect_delays: HashMap::new(),
     }));
 
     app.set_settings(app_config_to_settings(&app_config));
@@ -324,6 +326,8 @@ fn main() {
                     let _ = h.join();
                 }
             }
+            st.reconnecting_tunnels.remove(&id_str);
+            st.reconnect_delays.remove(&id_str);
         }
         drop(st);
         if let Some(app) = app_weak.upgrade() {
@@ -421,10 +425,14 @@ fn main() {
                         if let Some(app) = app_w.upgrade() {
                             let stopped_unexpectedly = is_running_clone.load(Ordering::Relaxed);
                             let mut auto = false;
+                            let mut uptime_secs = 0u64;
                             {
                                 let st = state_w.lock().unwrap_or_else(|p| p.into_inner());
                                 if let Some(c) = st.configs.iter().find(|x| x.id == id_clone) {
                                     auto = c.auto_connect;
+                                }
+                                if let Some((_, tel, _)) = st.running_tunnels.get(&id_clone) {
+                                    uptime_secs = tel.start_time.elapsed().as_secs();
                                 }
                             }
 
@@ -437,6 +445,11 @@ fn main() {
                                     app.set_show_host_key_prompt(true);
                                     auto = false; // Don't auto-reconnect if host key is unverified
                                 }
+                                Err(tunnel::TunnelError::AuthenticationFailed) => {
+                                    app.set_error_message(r2s("Authentication failed"));
+                                    app.set_show_error_prompt(true);
+                                    auto = false;
+                                }
                                 Err(tunnel::TunnelError::Message(e)) => {
                                     if !is_reconnect {
                                         app.set_error_message(r2s(&e));
@@ -448,14 +461,23 @@ fn main() {
                             app.invoke_stop_tunnel(r2s(&id_clone));
 
                             if stopped_unexpectedly && auto {
-                                {
+                                let delay = {
                                     let mut st = state_w.lock().unwrap_or_else(|p| p.into_inner());
                                     st.reconnecting_tunnels.insert(id_clone.clone());
-                                }
+                                    // Reset backoff if the connection was stable (> 60s uptime)
+                                    if uptime_secs > 60 {
+                                        st.reconnect_delays.remove(&id_clone);
+                                    }
+                                    let delay =
+                                        st.reconnect_delays.get(&id_clone).copied().unwrap_or(5);
+                                    let next_delay = (delay * 2).min(60);
+                                    st.reconnect_delays.insert(id_clone.clone(), next_delay);
+                                    delay
+                                };
                                 let app_reconnect = app.as_weak();
                                 let id_reconnect = id_clone.clone();
                                 thread::spawn(move || {
-                                    thread::sleep(std::time::Duration::from_secs(5));
+                                    thread::sleep(std::time::Duration::from_secs(delay));
                                     let _ = slint::invoke_from_event_loop(move || {
                                         if let Some(app) = app_reconnect.upgrade() {
                                             app.invoke_start_tunnel(r2s(&id_reconnect), true);
@@ -465,6 +487,7 @@ fn main() {
                             } else {
                                 let mut st = state_w.lock().unwrap_or_else(|p| p.into_inner());
                                 st.reconnecting_tunnels.remove(&id_clone);
+                                st.reconnect_delays.remove(&id_clone);
                             }
                         }
                     });
@@ -472,6 +495,7 @@ fn main() {
 
                 st.running_tunnels
                     .insert(id.clone(), (is_running, telemetry, Some(handle)));
+                st.reconnecting_tunnels.remove(&id);
             }
             drop(st);
             if let Some(app) = app_weak.upgrade() {
@@ -492,6 +516,7 @@ fn main() {
             }
         }
         st.reconnecting_tunnels.remove(&id);
+        st.reconnect_delays.remove(&id);
         drop(st);
         if let Some(app) = app_weak.upgrade() {
             app.invoke_update_search();

@@ -16,6 +16,7 @@ use zeroize::Zeroizing;
 #[derive(Debug)]
 pub enum TunnelError {
     Message(String),
+    AuthenticationFailed,
     UnknownHostKey(String, String), // fingerprint, base64_line
 }
 
@@ -130,7 +131,11 @@ pub async fn start_tunnel(
         key_error: key_error.clone(),
     };
 
-    let russh_config = russh::client::Config::default();
+    let russh_config = russh::client::Config {
+        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_max: 3,
+        ..Default::default()
+    };
     let russh_config = Arc::new(russh_config);
 
     let connect_future = russh::client::connect(
@@ -166,13 +171,16 @@ pub async fn start_tunnel(
     };
 
     if !auth_res {
-        return Err(TunnelError::Message("Authentication failed".to_string()));
+        return Err(TunnelError::AuthenticationFailed);
     }
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", config.local_port)).await?;
     let session = Arc::new(tokio::sync::Mutex::new(session));
 
-    let mut last_keepalive = Instant::now();
+    let mut health_interval = tokio::time::interval(Duration::from_secs(30));
+    health_interval.tick().await; // consume immediate first tick
+
+    let session_dead = Arc::new(AtomicBool::new(false));
 
     loop {
         tokio::select! {
@@ -180,8 +188,25 @@ pub async fn start_tunnel(
                 if !is_running.load(Ordering::Relaxed) {
                     break;
                 }
-                if last_keepalive.elapsed() > Duration::from_secs(5) {
-                    last_keepalive = Instant::now();
+                // Immediate reconnect when a real request discovers a dead session
+                if session_dead.load(Ordering::Relaxed) {
+                    return Err(TunnelError::Message("Connection lost".to_string()));
+                }
+            },
+            _ = health_interval.tick() => {
+                let sess = session.lock().await;
+                let check = tokio::time::timeout(
+                    Duration::from_secs(10),
+                    sess.channel_open_session(),
+                )
+                .await;
+                match check {
+                    Ok(Ok(channel)) => {
+                        let _ = channel.close().await;
+                    }
+                    _ => {
+                        return Err(TunnelError::Message("Connection lost".to_string()));
+                    }
                 }
             },
             accept_res = listener.accept() => {
@@ -190,51 +215,58 @@ pub async fn start_tunnel(
                     let target_host = config.target_host.clone();
                     let target_port = config.target_port;
                     let telemetry_clone = telemetry.clone();
+                    let session_dead_clone = session_dead.clone();
 
                     tokio::spawn(async move {
                         let channel_res = {
                             let sess = session_handle.lock().await;
                             sess.channel_open_direct_tcpip(target_host, target_port as u32, "localhost", 0).await
                         };
-                        if let Ok(channel) = channel_res {
-                            let stream = channel.into_stream();
+                        match channel_res {
+                            Ok(channel) => {
+                                let stream = channel.into_stream();
 
-                            let (mut user_rx, mut user_tx) = tokio::io::split(user_tcp);
-                            let (mut ch_rx, mut ch_tx) = tokio::io::split(stream);
+                                let (mut user_rx, mut user_tx) = tokio::io::split(user_tcp);
+                                let (mut ch_rx, mut ch_tx) = tokio::io::split(stream);
 
-                            let tel_tx = telemetry_clone.clone();
-                            let t1 = tokio::spawn(async move {
-                                let mut buf = [0u8; 8192];
-                                loop {
-                                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                                    match user_rx.read(&mut buf).await {
-                                        Ok(0) => break,
-                                        Ok(n) => {
-                                            let _: Result<(), _> = ch_tx.write_all(&buf[..n]).await;
-                                            tel_tx.tx_bytes.fetch_add(n as u64, Ordering::Relaxed);
+                                let tel_tx = telemetry_clone.clone();
+                                let t1 = tokio::spawn(async move {
+                                    let mut buf = [0u8; 8192];
+                                    loop {
+                                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                                        match user_rx.read(&mut buf).await {
+                                            Ok(0) => break,
+                                            Ok(n) => {
+                                                let _: Result<(), _> = ch_tx.write_all(&buf[..n]).await;
+                                                tel_tx.tx_bytes.fetch_add(n as u64, Ordering::Relaxed);
+                                            }
+                                            Err(_) => break,
                                         }
-                                        Err(_) => break,
                                     }
-                                }
-                            });
+                                });
 
-                            let tel_rx = telemetry_clone.clone();
-                            let t2 = tokio::spawn(async move {
-                                let mut buf = [0u8; 8192];
-                                loop {
-                                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                                    match ch_rx.read(&mut buf).await {
-                                        Ok(0) => break,
-                                        Ok(n) => {
-                                            let _: Result<(), _> = user_tx.write_all(&buf[..n]).await;
-                                            tel_rx.rx_bytes.fetch_add(n as u64, Ordering::Relaxed);
+                                let tel_rx = telemetry_clone.clone();
+                                let t2 = tokio::spawn(async move {
+                                    let mut buf = [0u8; 8192];
+                                    loop {
+                                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                                        match ch_rx.read(&mut buf).await {
+                                            Ok(0) => break,
+                                            Ok(n) => {
+                                                let _: Result<(), _> = user_tx.write_all(&buf[..n]).await;
+                                                tel_rx.rx_bytes.fetch_add(n as u64, Ordering::Relaxed);
+                                            }
+                                            Err(_) => break,
                                         }
-                                        Err(_) => break,
                                     }
-                                }
-                            });
+                                });
 
-                            let _ = tokio::join!(t1, t2);
+                                let _ = tokio::join!(t1, t2);
+                            }
+                            Err(_) => {
+                                // Signal the main loop to reconnect immediately
+                                session_dead_clone.store(true, Ordering::Relaxed);
+                            }
                         }
                     });
                 }
