@@ -446,8 +446,8 @@ fn main() {
                                     auto = false; // Don't auto-reconnect if host key is unverified
                                 }
                                 Err(tunnel::TunnelError::AuthenticationFailed) => {
-                                    app.set_error_message(r2s("Authentication failed"));
-                                    app.set_show_error_prompt(true);
+                                    app.set_auth_retry_tunnel_id(r2s(&id_clone));
+                                    app.set_show_auth_retry_prompt(true);
                                     auto = false;
                                 }
                                 Err(tunnel::TunnelError::Message(e)) => {

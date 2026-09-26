@@ -295,6 +295,11 @@ export component AppWindow inherits Window {
     callback show_error(string);
     callback submit_passwords(string, string, bool);
 
+    // Auth-failure re-prompt: lets the user enter a new password when auth fails
+    in-out property <bool>   show_auth_retry_prompt: false;
+    in-out property <string> auth_retry_tunnel_id;
+    property <string>        auth_retry_password;
+
     in-out property <bool>   show_info_prompt: false;
 
     in-out property <bool>   show_host_key_prompt: false;
@@ -734,7 +739,7 @@ export component AppWindow inherits Window {
                     padding-right: 16px;
                     spacing: 12px;
 
-                    Text { text: "rTunnel v0.2.1"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
+                    Text { text: "rTunnel v0.2.2"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
                     Text { text: "|"; color: Palette.border-light; font-size: 11px; vertical-alignment: center; }
                     Text { text: root.engine_active ? "Connection Engine Active" : "Connection Engine Inactive"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
                     Text { text: "|"; color: Palette.border-light; font-size: 11px; vertical-alignment: center; }
@@ -860,6 +865,70 @@ export component AppWindow inherits Window {
         }
     }
 
+    // ── Authentication retry overlay ─────────────────────────────────────────
+    // Shown when proxy auth fails (e.g. expired password) so the user can
+    // enter a new password directly without toggling save-password.
+    if (show_auth_retry_prompt) : Rectangle {
+        background: #00000099;
+        TouchArea { }
+
+        Rectangle {
+            width: 400px; height: 280px;
+            border-radius: 12px;
+            background: Palette.card;
+            border-width: 1px; border-color: #ef4444;
+            drop-shadow-color: #ef444440;
+            drop-shadow-blur: 24px; drop-shadow-offset-y: 8px;
+
+            VerticalLayout {
+                padding: 24px; spacing: 14px;
+
+                Text { text: "Authentication Failed"; font-weight: 700; color: #ef4444; font-size: 15px; }
+                Text {
+                    text: "The proxy password is incorrect or has expired.\nPlease enter the new password below.";
+                    wrap: word-wrap;
+                    color: Palette.text-sub;
+                    font-size: 13px;
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: "New Password:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; }
+                    LineEdit { input-type: password; text <=> auth_retry_password; }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                HorizontalLayout {
+                    spacing: 10px; alignment: end;
+                    Rectangle {
+                        width: 80px; height: 34px;
+                        border-radius: 8px; background: Palette.sidebar;
+                        border-width: 1px; border-color: Palette.border;
+                        Text { text: "Cancel"; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; color: Palette.text-sub; }
+                        TouchArea { clicked => {
+                            show_auth_retry_prompt = false;
+                            auth_retry_password = "";
+                        } }
+                    }
+                    Rectangle {
+                        width: 90px; height: 34px;
+                        border-radius: 8px;
+                        background: @linear-gradient(135deg, Palette.accent, Palette.accent-dark);
+                        Text { text: "Retry"; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; color: white; }
+                        TouchArea {
+                            clicked => {
+                                show_auth_retry_prompt = false;
+                                submit_passwords(auth_retry_tunnel_id, auth_retry_password, false);
+                                auth_retry_password = "";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ── Info overlay ────────────────────────────────────────────────────────
     if (show_info_prompt) : Rectangle {
         background: #00000099;
@@ -879,7 +948,7 @@ export component AppWindow inherits Window {
                 Text { text: "About rTunnel"; font-weight: 700; color: Palette.text-main; font-size: 15px; }
                 ScrollView {
                     width: 100%;
-                    Text { text: "rTunnel is a robust SSH Tunnel Manager designed to securely route your traffic.\n\nVersion: v0.2.1\nLicense: MIT and Apache 2.0"; wrap: word-wrap; color: Palette.text-sub; width: 374px; font-size: 13px; }
+                    Text { text: "rTunnel is a robust SSH Tunnel Manager designed to securely route your traffic.\n\nVersion: v0.2.2\nLicense: MIT and Apache 2.0"; wrap: word-wrap; color: Palette.text-sub; width: 374px; font-size: 13px; }
                 }
                 HorizontalLayout {
                     alignment: end;

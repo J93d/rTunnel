@@ -1,4 +1,4 @@
-# rTunnel v0.2.1
+# rTunnel v0.2.2
 
 **rTunnel** is an SSH tunneling desktop application designed to link a local Windows port to a Remote Server by tunneling through an intermediary Proxy SSH server.
 
@@ -12,6 +12,7 @@ The primary objective of rTunnel is to provide an easy-to-use GUI for managing c
 - **Portable Configuration**: `config.json` is stored alongside the executable (`std::env::current_exe()`). This allows the application to be completely portable. If the config is missing, the app defaults to an empty state.
 - **Secure Password Storage**: We utilize the `keyring` crate to store passwords natively in the **Windows Credential Manager**.
   - Passwords are saved with the prefixes `rTunnel_<id>_proxy` and `rTunnel_<id>_remote`.
+- **Auth Retry on Failure**: When proxy authentication fails (e.g. expired password), a dedicated retry dialog lets the user enter a new password immediately instead of requiring a manual toggle of the save-password setting.
 - **System Tray Integration**: Uses `tray-icon`. The Slint GUI intercepts the window close event to hide the application into the system tray, and clicking the tray icon restores it.
 
 ## Architecture
