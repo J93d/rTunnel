@@ -284,6 +284,7 @@ export component AppWindow inherits Window {
     callback delete_tunnel(string);
     callback toggle_auto_connect(string, bool);
     callback update_search();
+    callback browse_rsa_key();
 
     in-out property <bool>   show_password_prompt: false;
     in-out property <string> prompt_tunnel_id;
@@ -647,7 +648,21 @@ export component AppWindow inherits Window {
                                 HorizontalLayout { spacing: 10px; CheckBox { text: "Save Password"; checked <=> edit_data.save_proxy_password; } }
 
                                 Text { text: "Advanced (SSH)"; font-weight: 700; color: Palette.text-main; font-size: 13px; }
-                                HorizontalLayout { spacing: 10px; Text { text: "RSA Key Path:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; } LineEdit { text <=> edit_data.rsa_key_path; placeholder-text: "Optional (/path/to/id_rsa)"; } }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    Text { text: "RSA Key Path:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; }
+                                    LineEdit { text <=> edit_data.rsa_key_path; placeholder-text: "Optional (/path/to/id_rsa)"; horizontal-stretch: 1; }
+                                    Rectangle {
+                                        width: 80px; height: 34px;
+                                        border-radius: 6px;
+                                        background: browse_touch.pressed ? Palette.border-light : (browse_touch.has-hover ? Palette.sidebar.brighter(0.2) : Palette.sidebar);
+                                        border-width: 1px;
+                                        border-color: browse_touch.has-hover ? Palette.accent : Palette.border;
+                                        animate border-color, background { duration: 150ms; }
+                                        Text { text: "Browse..."; font-size: 12px; color: Palette.text-main; horizontal-alignment: center; vertical-alignment: center; }
+                                        browse_touch := TouchArea { clicked => { browse_rsa_key(); } }
+                                    }
+                                }
 
 
                                 Text { text: "Target Destination"; font-weight: 700; color: Palette.text-main; font-size: 13px; }
@@ -739,7 +754,7 @@ export component AppWindow inherits Window {
                     padding-right: 16px;
                     spacing: 12px;
 
-                    Text { text: "rTunnel v0.2.4"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
+                    Text { text: "rTunnel v0.2.5"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
                     Text { text: "|"; color: Palette.border-light; font-size: 11px; vertical-alignment: center; }
                     Text { text: root.engine_active ? "Connection Engine Active" : "Connection Engine Inactive"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
                     Text { text: "|"; color: Palette.border-light; font-size: 11px; vertical-alignment: center; }
@@ -964,7 +979,7 @@ export component AppWindow inherits Window {
                 Text { text: "About rTunnel"; font-weight: 700; color: Palette.text-main; font-size: 15px; }
                 ScrollView {
                     width: 100%;
-                    Text { text: "rTunnel is a robust SSH Tunnel Manager designed to securely route your traffic.\n\nVersion: v0.2.4\nLicense: MIT and Apache 2.0"; wrap: word-wrap; color: Palette.text-sub; width: 374px; font-size: 13px; }
+                    Text { text: "rTunnel is a robust SSH Tunnel Manager designed to securely route your traffic.\n\nVersion: v0.2.5\nLicense: MIT and Apache 2.0"; wrap: word-wrap; color: Palette.text-sub; width: 374px; font-size: 13px; }
                 }
                 HorizontalLayout {
                     alignment: end;

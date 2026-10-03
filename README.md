@@ -17,7 +17,7 @@ The primary objective of rTunnel is to provide an easy-to-use GUI for managing "
 - **Portable Configuration**: `config.json` is stored alongside the executable (`std::env::current_exe()`). This allows the application to be completely portable. If the config is missing, the app defaults to an empty state.
 - **Secure Password Storage**: We utilize the `keyring` crate to store passwords natively in the **Windows Credential Manager**.
   - Passwords are saved with the prefixes `rTunnel_<id>_proxy` and `rTunnel_<id>_remote`.
-- **SSH Key & Password Authentication**: Supports both password-based and private key authentication (RSA / PKCS#8).
+- **SSH Key & Password Authentication**: Supports both password-based and private key authentication (RSA / PKCS#8) with a native file picker to browse private keys, automatically bypassing password prompts when a key is configured.
 - **Host Key Verification & TOFU**: Performs strict known-hosts verification with Trust On First Use (TOFU) confirmation dialogs for unknown host keys.
 - **Auth Retry on Failure**: When proxy authentication fails (e.g. expired password), a dedicated retry dialog lets the user enter a new password immediately instead of requiring a manual toggle of the save-password setting.
 - **Auto-reconnect & Keep-Alive**: Periodically performs keep-alive checks and automatically reconnects if the SSH tunnel drops.

@@ -249,6 +249,30 @@ fn main() {
         }
     });
 
+    let app_weak_browse = app.as_weak();
+    app.on_browse_rsa_key(move || {
+        let app_weak = app_weak_browse.clone();
+        thread::spawn(move || {
+            let mut dialog = rfd::FileDialog::new().set_title("Select SSH Private Key");
+            if let Some(home) = dirs::home_dir() {
+                let ssh_dir = home.join(".ssh");
+                if ssh_dir.exists() {
+                    dialog = dialog.set_directory(&ssh_dir);
+                }
+            }
+            if let Some(path) = dialog.pick_file() {
+                let path_str = path.to_string_lossy().to_string();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(app) = app_weak.upgrade() {
+                        let mut data = app.get_edit_data();
+                        data.rsa_key_path = r2s(&path_str);
+                        app.set_edit_data(data);
+                    }
+                });
+            }
+        });
+    });
+
     app.on_save_settings(move |settings: AppSettings| {
         let updated = settings_to_app_config(&settings);
         let _ = save_app_config(&updated);
@@ -351,7 +375,8 @@ fn main() {
                 )
                 .unwrap_or_default();
 
-                let needs_proxy = proxy_pass.is_empty();
+                let has_rsa_key = !c.rsa_key_path.trim().is_empty();
+                let needs_proxy = !has_rsa_key && proxy_pass.is_empty();
 
                 (needs_proxy, proxy_pass)
             } else {

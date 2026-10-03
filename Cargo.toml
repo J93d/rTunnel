@@ -1,6 +1,6 @@
 [package]
 name = "rTunnel"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 
 [dependencies]
@@ -16,6 +16,7 @@ tokio = { version = "1.40", features = ["rt-multi-thread", "net", "io-util", "ti
 sha2 = "0.10.8"
 uuid = { version = "1.25.0", features = ["v4"] }
 zeroize = { version = "1", features = ["derive"] }
+rfd = "0.15"
 
 [build-dependencies]
 slint-build = "1.17.1"
