@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 auto-launcher = "1.1.0"
-base64 = "0.22.1"
+base64 = "0.23.1"
 dirs = "6"
 keyring = "4.1.6"
 serde = { version = "1.0.229", features = ["derive"] }
