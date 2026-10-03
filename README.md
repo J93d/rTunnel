@@ -1,8 +1,13 @@
-# rTunnel v0.2.4
+<h1 align="center">rTunnel (Rust)</h1>
 
-**rTunnel** is an SSH tunneling desktop application designed to link a local Windows port to a Remote Server by tunneling through an intermediary Proxy SSH server.
+<p align="center"><b>rTunnel is an SSH tunneling desktop application designed to link a local Windows port to a Remote Server by tunneling through an intermediary Proxy SSH server.</b></p>
 
-*This project was made using viibecoding.*
+<p align="center">
+  <a> <img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/github/downloads/j93d/rTunnel/total"></a>
+  <a href="https://opensource.org/license/mit"><img alt="GitHub License" src="https://img.shields.io/github/license/j93d/rTunnel"></a>
+</p>
+
+
 
 ## Design Philosophy
 
@@ -41,3 +46,5 @@ rTunnel runs a fully asynchronous event loop powered by Tokio:
 - `src/keyring_manager.rs`: Wrapper around the `keyring` crate for Windows Credential Manager integration.
 - `ui/main.slint`: Declarative Slint UI frontend.
 - `build.rs`: Compiles the `.slint` UI file.
+
+*This project was made using viibecoding.*
