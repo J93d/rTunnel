@@ -1,8 +1,6 @@
 use crate::config::TunnelConfig;
-use async_trait::async_trait;
+use russh::keys::{PrivateKeyWithHashAlg, PublicKeyBase64, PublicKeyOrCertificate};
 use russh::*;
-use russh_keys::PublicKeyBase64;
-use russh_keys::key;
 use sha2::{Digest, Sha256};
 use std::io::BufRead;
 use std::sync::Arc;
@@ -32,8 +30,8 @@ impl From<russh::Error> for TunnelError {
     }
 }
 
-impl From<russh_keys::Error> for TunnelError {
-    fn from(e: russh_keys::Error) -> Self {
+impl From<russh::keys::Error> for TunnelError {
+    fn from(e: russh::keys::Error) -> Self {
         TunnelError::Message(e.to_string())
     }
 }
@@ -57,17 +55,19 @@ struct ClientHandler {
     key_error: Arc<Mutex<Option<TunnelError>>>,
 }
 
-#[async_trait]
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &key::PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        // Extract the public key from the enum (could be a key or certificate)
+        let public_key = server_public_key.public_key();
+
         let mut found = false;
 
-        let pub_key_bytes = server_public_key.public_key_bytes();
+        let pub_key_bytes = public_key.public_key_bytes();
         use base64::{Engine as _, engine::general_purpose::STANDARD};
         let b64_key = STANDARD.encode(&pub_key_bytes);
 
@@ -94,7 +94,8 @@ impl client::Handler for ClientHandler {
             .map(|b| format!("{:02x}", b))
             .collect::<String>();
 
-        let key_type_str = server_public_key.name(); // e.g., ssh-ed25519
+        let algorithm = public_key.algorithm();
+        let key_type_str = algorithm.as_str(); // e.g., ssh-ed25519
 
         let port_str = if self.port == 22 {
             self.host.clone()
@@ -167,9 +168,11 @@ pub async fn start_tunnel(
         } else {
             Some(proxy_pass.as_str())
         };
-        let key = russh_keys::load_secret_key(key_path, passphrase)?;
+        let key = russh::keys::load_secret_key(key_path, passphrase)?;
+        let hash_alg = session.best_supported_rsa_hash().await?.flatten();
+        let key_with_alg = PrivateKeyWithHashAlg::new(Arc::new(key), hash_alg);
         session
-            .authenticate_publickey(config.proxy_username.clone(), Arc::new(key))
+            .authenticate_publickey(config.proxy_username.clone(), key_with_alg)
             .await?
     } else {
         session
@@ -177,7 +180,7 @@ pub async fn start_tunnel(
             .await?
     };
 
-    if !auth_res {
+    if !auth_res.success() {
         return Err(TunnelError::AuthenticationFailed);
     }
 

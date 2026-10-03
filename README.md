@@ -1,4 +1,4 @@
-# rTunnel v0.2.3
+# rTunnel v0.2.4
 
 **rTunnel** is an SSH tunneling desktop application designed to link a local Windows port to a Remote Server by tunneling through an intermediary Proxy SSH server.
 
@@ -6,42 +6,38 @@
 
 ## Design Philosophy
 
-The primary objective of rTunnel is to provide an easy-to-use GUI for managing complex "Jump Host" port forwarding scenarios where the user needs to authenticate with a Proxy server and then authenticate again with a Remote server before forwarding a specific target port.
+The primary objective of rTunnel is to provide an easy-to-use GUI for managing "Jump Host" port forwarding scenarios where the user needs to authenticate with a Proxy server and forward local traffic to a target destination through a secure SSH tunnel.
 
 ### Core Features
 - **Portable Configuration**: `config.json` is stored alongside the executable (`std::env::current_exe()`). This allows the application to be completely portable. If the config is missing, the app defaults to an empty state.
 - **Secure Password Storage**: We utilize the `keyring` crate to store passwords natively in the **Windows Credential Manager**.
   - Passwords are saved with the prefixes `rTunnel_<id>_proxy` and `rTunnel_<id>_remote`.
+- **SSH Key & Password Authentication**: Supports both password-based and private key authentication (RSA / PKCS#8).
+- **Host Key Verification & TOFU**: Performs strict known-hosts verification with Trust On First Use (TOFU) confirmation dialogs for unknown host keys.
 - **Auth Retry on Failure**: When proxy authentication fails (e.g. expired password), a dedicated retry dialog lets the user enter a new password immediately instead of requiring a manual toggle of the save-password setting.
-- **System Tray Integration**: Uses `tray-icon`. The Slint GUI intercepts the window close event to hide the application into the system tray, and clicking the tray icon restores it.
+- **Auto-reconnect & Keep-Alive**: Periodically performs keep-alive checks and automatically reconnects if the SSH tunnel drops.
+- **System Tray Integration**: Slint GUI window can be minimized/restored from the Windows system tray.
 
 ## Architecture
 
-- **Language**: Rust
+- **Language**: Rust (Edition 2024)
 - **GUI Framework**: Slint (`ui/main.slint`)
-- **SSH Backend**: `ssh2` (a libssh2 wrapper).
+- **SSH Backend**: `russh` 0.63 (pure-Rust async SSH implementation powered by Tokio and Ring)
+- **Async Runtime**: `tokio`
 
-### The Double-SSH Tunneling Logic (`src/tunnel.rs`)
+### Asynchronous Tunneling Logic (`src/tunnel.rs`)
 
-Multiplexing a single `ssh2::Session` across multiple threads for simultaneous port-forwarding channels is extremely difficult in Rust due to `libssh2`'s strict locking constraints and lack of `Sync` traits.
-
-To ensure **100% reliability** and bypass these threading complexities, rTunnel uses a **per-connection isolated tunnel** approach. For *every* incoming client connection on the local port, the application spins up an isolated background thread that performs the following steps:
-
-1. **Proxy Connection**: Establishes a new `TcpStream` and a new `ssh2::Session` to the Proxy Server and authenticates.
-2. **Internal Loopback**: Creates a temporary `TcpListener` on `127.0.0.1:0`.
-3. **Proxy Channel Bridge**: Requests a `direct_tcpip` channel on the Proxy session to the Remote Server, and bidirectionally bridges it to the internal loopback socket.
-4. **Remote Connection**: Connects a second `ssh2::Session` to the local loopback socket, completing the SSH handshake with the Remote Server through the Proxy channel.
-5. **Target Bridge**: Finally, requests a `direct_tcpip` channel on the Remote session to the Target Destination, and bidirectionally bridges the original user's TCP stream to this final channel.
-
-While this approach introduces a slight latency penalty during the initial connection setup (~500ms to establish double SSH handshakes), it is entirely stateless, parallelizable, and rock-solid for long-running TCP streams (like HTTP keep-alive).
+rTunnel runs a fully asynchronous event loop powered by Tokio:
+1. **Proxy Connection & Handshake**: Connects asynchronously to the SSH jump host using `russh::client::connect` and validates the server key against `known_hosts`.
+2. **Authentication**: Authenticates using either password or private key (`authenticate_publickey` / `authenticate_password`).
+3. **Local Listener**: Binds a `tokio::net::TcpListener` on the configured local port.
+4. **Direct TCPIP Forwarding**: For each incoming client connection on the local port, opens an async direct-tcpip channel (`channel_open_direct_tcpip`) to the target destination host and port through the proxy session.
+5. **Bidirectional Stream Copy**: Streams data between local sockets and SSH channels concurrently with real-time throughput telemetry (TX/RX metrics).
 
 ### File Structure
-- `src/main.rs`: Coordinates the Slint event loop, System Tray, and bridges the state.
-- `src/tunnel.rs`: Implements the blocking, multithreaded double-SSH bridging logic.
-- `src/config.rs`: Manages the reading and writing of `TunnelConfig` to the portable JSON file.
-- `src/keyring_manager.rs`: Wrapper around the `keyring` crate for password management.
-- `ui/main.slint`: The declarative Slint frontend.
+- `src/main.rs`: Coordinates the Slint event loop, System Tray, auto-reconnect, and bridges state.
+- `src/tunnel.rs`: Implements the asynchronous SSH connection, host key verification, and tunneling logic via `russh`.
+- `src/config.rs`: Manages reading and writing `TunnelConfig` to the portable JSON file.
+- `src/keyring_manager.rs`: Wrapper around the `keyring` crate for Windows Credential Manager integration.
+- `ui/main.slint`: Declarative Slint UI frontend.
 - `build.rs`: Compiles the `.slint` UI file.
-
-## Future Scope (Next Phases)
-- **SSH Key Authentication**: Currently, only password-based authentication is supported. The next phase will involve adding support for RSA/Ed25519 keys (e.g., parsing keys via `rfd` file dialogs or checking `~/.ssh/id_rsa`).
