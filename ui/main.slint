@@ -739,7 +739,7 @@ export component AppWindow inherits Window {
                     padding-right: 16px;
                     spacing: 12px;
 
-                    Text { text: "rTunnel v0.2.2"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
+                    Text { text: "rTunnel v0.2.3"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
                     Text { text: "|"; color: Palette.border-light; font-size: 11px; vertical-alignment: center; }
                     Text { text: root.engine_active ? "Connection Engine Active" : "Connection Engine Inactive"; color: Palette.text-sub; font-size: 11px; vertical-alignment: center; }
                     Text { text: "|"; color: Palette.border-light; font-size: 11px; vertical-alignment: center; }
@@ -800,7 +800,15 @@ export component AppWindow inherits Window {
                 Text { text: "Authentication Required"; font-weight: 700; color: Palette.text-main; font-size: 15px; }
                 if (prompt_needs_proxy) : HorizontalLayout {
                     Text { text: "Proxy Pass:"; width: 100px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; }
-                    LineEdit { input-type: password; text <=> prompt_proxy_pass; }
+                    LineEdit {
+                        input-type: password;
+                        text <=> prompt_proxy_pass;
+                        accepted => {
+                            show_password_prompt = false;
+                            submit_passwords(prompt_tunnel_id, prompt_proxy_pass, false);
+                            prompt_proxy_pass = "";
+                        }
+                    }
                 }
                 Rectangle { vertical-stretch: 1; }
                 HorizontalLayout {
@@ -894,7 +902,15 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     spacing: 10px;
                     Text { text: "New Password:"; width: 110px; vertical-alignment: center; color: Palette.text-sub; font-size: 13px; }
-                    LineEdit { input-type: password; text <=> auth_retry_password; }
+                    LineEdit {
+                        input-type: password;
+                        text <=> auth_retry_password;
+                        accepted => {
+                            show_auth_retry_prompt = false;
+                            submit_passwords(auth_retry_tunnel_id, auth_retry_password, false);
+                            auth_retry_password = "";
+                        }
+                    }
                 }
 
                 Rectangle { vertical-stretch: 1; }
@@ -948,7 +964,7 @@ export component AppWindow inherits Window {
                 Text { text: "About rTunnel"; font-weight: 700; color: Palette.text-main; font-size: 15px; }
                 ScrollView {
                     width: 100%;
-                    Text { text: "rTunnel is a robust SSH Tunnel Manager designed to securely route your traffic.\n\nVersion: v0.2.2\nLicense: MIT and Apache 2.0"; wrap: word-wrap; color: Palette.text-sub; width: 374px; font-size: 13px; }
+                    Text { text: "rTunnel is a robust SSH Tunnel Manager designed to securely route your traffic.\n\nVersion: v0.2.3\nLicense: MIT and Apache 2.0"; wrap: word-wrap; color: Palette.text-sub; width: 374px; font-size: 13px; }
                 }
                 HorizontalLayout {
                     alignment: end;

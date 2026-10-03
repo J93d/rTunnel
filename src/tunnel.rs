@@ -143,14 +143,21 @@ pub async fn start_tunnel(
         (config.proxy_host.as_str(), config.proxy_port),
         handler,
     );
-    let mut session = tokio::time::timeout(Duration::from_secs(connection_timeout), connect_future)
-        .await
-        .map_err(|_| TunnelError::Message("Connection timeout".to_string()))??;
+    let connect_result =
+        tokio::time::timeout(Duration::from_secs(connection_timeout), connect_future)
+            .await
+            .map_err(|_| TunnelError::Message("Connection timeout".to_string()))?;
 
-    // Check if key error was set during connect
+    // Check if key error was set during connect — must happen before
+    // propagating the connect error, because returning Ok(false) from
+    // check_server_key causes russh to tear down the connection with a
+    // generic error. We want to surface our specific UnknownHostKey error
+    // so the UI can show the TOFU accept/reject dialog.
     if let Some(err) = key_error.lock().await.take() {
         return Err(err);
     }
+
+    let mut session = connect_result?;
 
     // Auth
     let auth_res = if !config.rsa_key_path.is_empty() {
