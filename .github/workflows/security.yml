@@ -16,7 +16,7 @@ jobs:
     name: Cargo Audit
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install cargo-audit
         run: cargo install cargo-audit
       - name: Run cargo audit
@@ -26,6 +26,6 @@ jobs:
     name: Cargo Clippy
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run clippy
         run: cargo clippy -- -D warnings
